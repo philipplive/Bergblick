@@ -204,6 +204,7 @@ final class TileService {
 				if ($httpCode === 200 && is_string ($body) && $body !== '') {
 					$results[$key] = $body;
 					$dir = dirname ($cacheFile);
+
 					if (is_dir ($dir) || @mkdir ($dir, 0775, true))
 						@file_put_contents ($cacheFile, $body);
 				}
