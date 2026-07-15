@@ -429,9 +429,26 @@ scene.add(sun);
 if (CONFIG.groundVisible) {
     scene.fog = new THREE.Fog(CONFIG.backdrop, 400, 900);
     const groundGeometry = new THREE.PlaneGeometry(4000, 4000).rotateX(-Math.PI / 2);
+    // Radialer Alphaverlauf: Platte fadet gegen aussen weich aus (wie in der App)
+    const fadeCanvas = document.createElement('canvas');
+    fadeCanvas.width = 512;
+    fadeCanvas.height = 512;
+    const fadeCtx = fadeCanvas.getContext('2d');
+    const fadeGradient = fadeCtx.createRadialGradient(256, 256, 0, 256, 256, 256);
+    fadeGradient.addColorStop(0.0, '#ffffff');
+    fadeGradient.addColorStop(0.12, '#ffffff');
+    fadeGradient.addColorStop(0.42, '#000000');
+    fadeGradient.addColorStop(1.0, '#000000');
+    fadeCtx.fillStyle = fadeGradient;
+    fadeCtx.fillRect(0, 0, 512, 512);
     const ground = new THREE.Mesh(
         groundGeometry,
-        new THREE.MeshBasicMaterial({ color: CONFIG.backdrop })
+        new THREE.MeshBasicMaterial({
+            color: CONFIG.backdrop,
+            alphaMap: new THREE.CanvasTexture(fadeCanvas),
+            transparent: true,
+            depthWrite: false,
+        })
     );
     ground.position.y = -0.6;
     scene.add(ground);
@@ -461,6 +478,9 @@ controls.enableDamping = true;
 controls.autoRotate = true;
 controls.autoRotateSpeed = 1.0;
 canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; }, { once: true });
+// Neigungslimit aus der Konfiguration (wird nach dem Laden des Modells gesetzt);
+// die 0-Ebene wird davon unabhängig pro Frame als harte Untergrenze erzwungen
+let tiltMaxPolar = Math.PI;
 
 // --- Wolken (weiche Sprite-Puffs + unsichtbare Schattenwerfer) ---
 const cloudConfig = { count: 0, speed: 50, size: 100, opacity: 90, ...CONFIG.clouds };
@@ -842,7 +862,7 @@ new GLTFLoader().load(GLB_FILE, (gltf) => {
     const startPolar = Math.acos(Math.min(1, Math.max(-1, startOffset.y / (startOffset.length() || 1))));
     const tiltLimit = ((CONFIG.tiltLimit ?? 90) * Math.PI) / 180;
     controls.minPolarAngle = Math.max(0, startPolar - tiltLimit);
-    controls.maxPolarAngle = Math.min(Math.PI, startPolar + tiltLimit);
+    tiltMaxPolar = Math.min(Math.PI, startPolar + tiltLimit);
     const zoomInFactor = 1 - Math.min(0.95, Math.max(0, (CONFIG.zoomInLimit ?? 50) / 100));
     if (camera.isOrthographicCamera) {
         controls.minZoom = camera.zoom;
@@ -874,6 +894,11 @@ resize();
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
     animateClouds(clock.getDelta());
+    // Kamera nie unter die 0-Ebene (Modellboden), egal welches Neigungslimit
+    // gilt: camera.y = target.y + r*cos(phi) >= 0, abhängig von Ziel und Zoom
+    const r = camera.position.distanceTo(controls.target) || 1;
+    const groundPolar = Math.acos(Math.min(1, Math.max(-1, -controls.target.y / r)));
+    controls.maxPolarAngle = Math.min(tiltMaxPolar, groundPolar);
     controls.update();
     renderer.render(scene, camera);
 });

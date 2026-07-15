@@ -164,6 +164,65 @@ export function hypsoColor(t, isWater) {
     return [1, 1, 1];
 }
 
+/**
+ * Radialer Alphaverlauf (weiss = deckend, schwarz = durchsichtig) für die
+ * Bodenplatte: unter dem Modell voll deckend, gegen aussen weich auslaufend.
+ */
+function makeGroundFadeTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(256, 256, 0, 256, 256, 256);
+    gradient.addColorStop(0.0, '#ffffff');
+    gradient.addColorStop(0.12, '#ffffff'); // bis ~240 Einheiten voll deckend
+    gradient.addColorStop(0.42, '#000000'); // ab ~840 Einheiten unsichtbar
+    gradient.addColorStop(1.0, '#000000');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 512, 512);
+    return new THREE.CanvasTexture(canvas);
+}
+
+/** Deterministischer Pseudozufall in [0, 1) aus einem Ganzzahl-Index. */
+function hash1(i) {
+    const s = Math.sin(i * 127.1) * 43758.5453;
+    return s - Math.floor(s);
+}
+
+/** Deterministisches Wert-Rauschen in ca. [-1, 1] aus Weltkoordinaten. */
+function skirtNoise(x, y, z) {
+    // Domain-Warp: verhindert, dass die Sinus-Summe als Gittermuster durchscheint
+    const w = Math.sin(x * 0.53 + z * 0.71 + y * 0.37) * 1.7;
+    return Math.sin(x * 1.7 + z * 2.3 + y * 0.6 + w) * 0.36
+        + Math.sin(y * 2.9 + x * 0.8 - z * 1.1 - w) * 0.34
+        + Math.sin(z * 3.7 - y * 1.9 + x * 2.9 + w * 0.5) * 0.30;
+}
+
+/**
+ * Horizontale Auslenkung der Sockelwand (in Szenen-Einheiten) an einer
+ * Weltposition — gibt jedem Sockel-Stil eine eigene 3D-Reliefstruktur.
+ * Deterministisch, damit die Wand bei Rebuilds (Slider) nicht flackert.
+ */
+function skirtDisplacement(style, x, y, z) {
+    if (style === 'soil') {
+        // Erdreich: feinkörnig-buckelig, weich
+        return skirtNoise(x * 0.9, y * 0.9, z * 0.9) * 0.35
+            + skirtNoise(x * 1.6, y * 1.6, z * 1.6) * 0.16;
+    }
+    if (style === 'rock') {
+        // Fels: grob und kantig — geriffeltes (ridged) Rauschen betont Grate
+        const ridge = 1 - Math.abs(skirtNoise(x * 0.35, y * 0.45, z * 0.35));
+        return (ridge * 2 - 1) * 0.8 + skirtNoise(x * 1.1, y * 1.1, z * 1.1) * 0.15;
+    }
+    if (style === 'strata') {
+        // Gesteinsschichten: horizontale Bänder springen als Simse vor/zurück
+        const wave = Math.sin(x * 0.16 + z * 0.13) * 0.7;
+        const band = Math.floor((y + wave) / 2.4);
+        return (hash1(band) - 0.5) * 1.8 + skirtNoise(x * 0.9, y * 0.9, z * 0.9) * 0.1;
+    }
+    return 0; // 'color': glatte Wand
+}
+
 export class TerrainViewer {
     constructor(container) {
         this.container = container;
@@ -173,6 +232,7 @@ export class TerrainViewer {
             basePercent: 15,
             baseColor: '#5c5148',
             baseStyle: 'color', // 'color' | 'soil' | 'rock' | 'strata'
+            baseRelief: 100,    // Stärke des Sockel-Reliefs in Prozent (0 = flach)
             groundColor: '#262b36',
             shadowColor: '#000000',
             shadowHardness: 60,
@@ -225,7 +285,12 @@ export class TerrainViewer {
         const groundGeometry = new THREE.PlaneGeometry(4000, 4000).rotateX(-Math.PI / 2);
         this.groundMesh = new THREE.Mesh(
             groundGeometry,
-            new THREE.MeshBasicMaterial({ color: this.options.groundColor })
+            new THREE.MeshBasicMaterial({
+                color: this.options.groundColor,
+                alphaMap: makeGroundFadeTexture(), // fadet gegen aussen aus
+                transparent: true,
+                depthWrite: false,
+            })
         );
         this.groundMesh.position.y = -0.6;
         this.scene.add(this.groundMesh);
@@ -301,9 +366,22 @@ export class TerrainViewer {
         this.clock = new THREE.Clock();
         this.renderer.setAnimationLoop(() => {
             this.animateClouds(this.clock.getDelta());
+            this.clampOrbitAboveGround();
             this.controls.update();
             this.renderer.render(this.scene, this.camera);
         });
+    }
+
+    /**
+     * Begrenzt die Orbit-Neigung so, dass die Kamera nie unter die 0-Ebene
+     * (Modellboden) gerät. Der zulässige Polarwinkel hängt von Zielhöhe und
+     * Abstand ab (camera.y = target.y + r·cos φ ≥ 0) und wird deshalb pro
+     * Frame neu berechnet — er ändert sich mit Zoom und Verschieben.
+     */
+    clampOrbitAboveGround() {
+        const target = this.controls.target;
+        const r = this.camera.position.distanceTo(target) || 1;
+        this.controls.maxPolarAngle = Math.acos(Math.min(1, Math.max(-1, -target.y / r)));
     }
 
     /** OrbitControls an die aktive Kamera binden (Ziel bleibt erhalten). */
@@ -848,59 +926,184 @@ export class TerrainViewer {
     /**
      * Seitenwände und Boden entlang des Geländerands. UVs in Weltmassstab
      * (eine Texturkachel pro 25 Einheiten), damit Sockel-Texturen gleichmässig
-     * und ohne Verzerrung liegen.
+     * und ohne Verzerrung liegen. Ausser bei Stil "Einfarbig" werden die Wände
+     * vertikal unterteilt und stilabhängig nach aussen ausgelenkt (Relief);
+     * die Auslenkung läuft an Geländekante und Bodenplatte auf 0 aus, damit
+     * keine Spalten zu Gelände und Boden entstehen. Die Normalen werden über
+     * die Relieffläche gemittelt (weich gerundet statt facettiert); nur an
+     * scharfen Randknicken (Rechteck-/Sechseck-Ecken) bleibt die Kante hart.
      */
     rebuildSkirt() {
         const TEX = 25; // Weltbreite einer Texturkachel
         const loop = this.model.boundary;
         const pos = this.terrainMesh.geometry.attributes.position;
         const n = loop.length;
-        const verts = [];
-        const uvs = [];
-        const push = (x, y, z, u, v) => {
-            verts.push(x, y, z);
-            uvs.push(u, v);
-        };
+        const style = this.options.baseStyle;
 
         // Umfangslängen für die u-Koordinate der Wände
         const cumulative = new Float32Array(n + 1);
+        let maxTop = 0;
         for (let i = 0; i < n; i++) {
             const a = loop[i];
             const b = loop[(i + 1) % n];
             const dx = pos.getX(b) - pos.getX(a);
             const dz = pos.getZ(b) - pos.getZ(a);
             cumulative[i + 1] = cumulative[i] + Math.hypot(dx, dz);
+            maxTop = Math.max(maxTop, pos.getY(a));
         }
 
+        // Vertikale Unterteilung nur, wenn der Stil ein Relief hat
+        const relief = (this.options.baseRelief ?? 100) / 100;
+        const rows = style === 'color' || relief === 0
+            ? 1
+            : Math.min(40, Math.max(8, Math.ceil(maxTop / 0.8)));
+        const smooth = (t) => {
+            const c = Math.min(1, Math.max(0, t));
+            return c * c * (3 - 2 * c);
+        };
+
+        // Wandpunkte pro Randvertex, vom Boden (j = 0) bis zur Geländekante
+        // (j = rows), ausgelenkt entlang der XZ-Auswärtsnormale des Rands
+        const columns = new Array(n);
         for (let i = 0; i < n; i++) {
-            const a = loop[i];
-            const b = loop[(i + 1) % n];
-            const ax = pos.getX(a), ay = pos.getY(a), az = pos.getZ(a);
-            const bx = pos.getX(b), by = pos.getY(b), bz = pos.getZ(b);
+            const v = loop[i];
+            const x = pos.getX(v), top = pos.getY(v), z = pos.getZ(v);
+            const column = new Float32Array((rows + 1) * 3);
+            let nx = 0, nz = 0;
+            if (rows > 1) {
+                const p = loop[(i - 1 + n) % n];
+                const q = loop[(i + 1) % n];
+                nx = -(pos.getZ(q) - pos.getZ(p));
+                nz = pos.getX(q) - pos.getX(p);
+                // nach aussen orientieren (Modell ist um den Ursprung zentriert)
+                if (nx * x + nz * z < 0) {
+                    nx = -nx;
+                    nz = -nz;
+                }
+                const len = Math.hypot(nx, nz) || 1;
+                nx /= len;
+                nz /= len;
+            }
+            for (let j = 0; j <= rows; j++) {
+                const t = j / rows;
+                // Dämpfung: 0 an Kante und Boden; flache Sockel bleiben fast glatt
+                const fade = smooth(t / 0.18) * smooth((1 - t) / 0.18) * Math.min(1, top / 8);
+                const d = fade > 0 ? skirtDisplacement(style, x, top * t, z) * fade * relief : 0;
+                column[j * 3] = x + nx * d;
+                column[j * 3 + 1] = top * t;
+                column[j * 3 + 2] = z + nz * d;
+            }
+            columns[i] = column;
+        }
+
+        // Scharfe Randknicke (z. B. Rechteck-Ecken) erkennen — dort wird die
+        // Umfangs-Tangente einseitig gebildet, die Kante bleibt sichtbar hart
+        const sharp = new Uint8Array(n);
+        for (let i = 0; i < n; i++) {
+            const p = loop[(i - 1 + n) % n];
+            const v = loop[i];
+            const q = loop[(i + 1) % n];
+            const d1x = pos.getX(v) - pos.getX(p);
+            const d1z = pos.getZ(v) - pos.getZ(p);
+            const d2x = pos.getX(q) - pos.getX(v);
+            const d2z = pos.getZ(q) - pos.getZ(v);
+            const len = (Math.hypot(d1x, d1z) || 1) * (Math.hypot(d2x, d2z) || 1);
+            sharp[i] = (d1x * d2x + d1z * d2z) / len < 0.85 ? 1 : 0; // Knick über ~30°
+        }
+
+        // Über die Fläche gemittelte Normalen (Kreuzprodukt der Tangenten
+        // entlang Umfang und Höhe): das Relief wirkt weich gerundet statt
+        // facettiert, wie es computeVertexNormals() auf der unindizierten
+        // Dreiecksliste ergäbe
+        const normalsFor = (prev, cur, next) => {
+            const out = new Float32Array((rows + 1) * 3);
+            for (let j = 0; j <= rows; j++) {
+                const j0 = j * 3;
+                const ju = Math.min(rows, j + 1) * 3;
+                const jd = Math.max(0, j - 1) * 3;
+                const tx = next[j0] - prev[j0];
+                const ty = next[j0 + 1] - prev[j0 + 1];
+                const tz = next[j0 + 2] - prev[j0 + 2];
+                const vx = cur[ju] - cur[jd];
+                const vy = cur[ju + 1] - cur[jd + 1];
+                const vz = cur[ju + 2] - cur[jd + 2];
+                // Tangente-Umfang × Tangente-Höhe zeigt bei diesem Umlaufsinn nach aussen
+                const nx = ty * vz - tz * vy;
+                const ny = tz * vx - tx * vz;
+                const nz = tx * vy - ty * vx;
+                const norm = Math.hypot(nx, ny, nz) || 1;
+                out[j0] = nx / norm;
+                out[j0 + 1] = ny / norm;
+                out[j0 + 2] = nz / norm;
+            }
+            return out;
+        };
+        const smoothNormals = new Array(n);
+        for (let i = 0; i < n; i++) {
+            smoothNormals[i] = sharp[i]
+                ? null // an Knicken pro Segment einseitig gebildet
+                : normalsFor(columns[(i - 1 + n) % n], columns[i], columns[(i + 1) % n]);
+        }
+
+        const wallVerts = n * rows * 6;
+        const verts = new Float32Array((wallVerts + n * 3) * 3);
+        const norms = new Float32Array((wallVerts + n * 3) * 3);
+        const uvs = new Float32Array((wallVerts + n * 3) * 2);
+        let vi = 0;
+        let ui = 0;
+        const push = (P, N, j, u) => {
+            const j3 = j * 3;
+            norms[vi] = N[j3];
+            verts[vi++] = P[j3];
+            norms[vi] = N[j3 + 1];
+            verts[vi++] = P[j3 + 1];
+            norms[vi] = N[j3 + 2];
+            verts[vi++] = P[j3 + 2];
+            uvs[ui++] = u;
+            uvs[ui++] = P[j3 + 1] / TEX;
+        };
+
+        for (let i = 0; i < n; i++) {
+            const A = columns[i];
+            const B = columns[(i + 1) % n];
+            const NA = smoothNormals[i] ?? normalsFor(A, A, B);
+            const NB = smoothNormals[(i + 1) % n] ?? normalsFor(A, B, B);
             const ua = cumulative[i] / TEX;
             const ub = cumulative[i + 1] / TEX;
-            // Wand-Quad von der Geländekante bis zum Boden (y = 0)
-            push(ax, ay, az, ua, ay / TEX);
-            push(ax, 0, az, ua, 0);
-            push(bx, 0, bz, ub, 0);
-            push(ax, ay, az, ua, ay / TEX);
-            push(bx, 0, bz, ub, 0);
-            push(bx, by, bz, ub, by / TEX);
+            // Wandstreifen von der Geländekante bis zum Boden (y = 0)
+            for (let j = 0; j < rows; j++) {
+                push(A, NA, j + 1, ua);
+                push(A, NA, j, ua);
+                push(B, NB, j, ub);
+                push(A, NA, j + 1, ua);
+                push(B, NB, j, ub);
+                push(B, NB, j + 1, ub);
+            }
         }
 
-        // Boden als Fächer um den Mittelpunkt
+        // Boden als Fächer um den Mittelpunkt (Normale zeigt nach unten)
+        const pushFloor = (x, z) => {
+            norms[vi] = 0;
+            verts[vi++] = x;
+            norms[vi] = -1;
+            verts[vi++] = 0;
+            norms[vi] = 0;
+            verts[vi++] = z;
+            uvs[ui++] = x / TEX;
+            uvs[ui++] = z / TEX;
+        };
         for (let i = 0; i < n; i++) {
             const a = loop[i];
             const b = loop[(i + 1) % n];
-            push(0, 0, 0, 0, 0);
-            push(pos.getX(b), 0, pos.getZ(b), pos.getX(b) / TEX, pos.getZ(b) / TEX);
-            push(pos.getX(a), 0, pos.getZ(a), pos.getX(a) / TEX, pos.getZ(a) / TEX);
+            pushFloor(0, 0);
+            pushFloor(pos.getX(b), pos.getZ(b));
+            pushFloor(pos.getX(a), pos.getZ(a));
         }
 
         const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
-        geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
-        geo.computeVertexNormals();
+        geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+        geo.setAttribute('normal', new THREE.BufferAttribute(norms, 3));
+        geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
         this.skirtMesh.geometry.dispose();
         this.skirtMesh.geometry = geo;
     }
@@ -925,7 +1128,13 @@ export class TerrainViewer {
         if (this.skirtMesh) {
             this.skirtMesh.material.map = this.baseTexture(style);
             this.skirtMesh.material.needsUpdate = true;
+            this.rebuildSkirt(); // Stil bestimmt auch die Reliefstruktur der Wände
         }
+    }
+
+    setBaseRelief(value) {
+        this.options.baseRelief = value;
+        if (this.skirtMesh) this.rebuildSkirt();
     }
 
     setGroundColor(color) {

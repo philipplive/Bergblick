@@ -94,9 +94,10 @@ final class TileService {
 		foreach ($this->fetchTiles ($source, $cfg, $zoom, $tiles) as $key => $data) {
 			[$tx, $ty] = $tiles[$key];
 			$tileImg = @imagecreatefromstring ($data);
-			if ($tileImg === false) {
+
+			if ($tileImg === false)
 				continue;
-			}
+
 			imagecopy (
 				$canvas,
 				$tileImg,
@@ -111,6 +112,7 @@ final class TileService {
 
 		if ($rescale) {
 			$scale = $targetSize / max ($cropW, $cropH);
+
 			if ($scale < 1.0) {
 				// IMG_BICUBIC schlägt in manchen GD-Builds fehl, daher Standard-Modus (bilinear)
 				$scaled = imagescale ($canvas, max (2, (int)round ($cropW * $scale)), max (2, (int)round ($cropH * $scale)));
@@ -152,6 +154,7 @@ final class TileService {
 	private function countTiles (float $west, float $south, float $east, float $north, int $zoom): int {
 		$tx = (int)floor ($this->lonToX ($east, $zoom)) - (int)floor ($this->lonToX ($west, $zoom)) + 1;
 		$ty = (int)floor ($this->latToY ($south, $zoom)) - (int)floor ($this->latToY ($north, $zoom)) + 1;
+
 		return $tx * $ty;
 	}
 

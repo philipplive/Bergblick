@@ -32,7 +32,16 @@ declare(strict_types=1);
 <body>
 <div id="layout">
     <aside id="sidebar">
-        <h1><?= htmlspecialchars($appName) ?></h1>
+        <header id="app-header">
+            <h1><?= htmlspecialchars($appName) ?></h1>
+            <div id="app-menu">
+                <button id="btn-menu" class="btn" title="Menü">☰</button>
+                <div id="app-menu-dropdown" hidden>
+                    <button id="btn-import" class="menu-item">Projekt importieren</button>
+                    <input type="file" id="opt-import-file" accept="application/json,.json" hidden>
+                </div>
+            </div>
+        </header>
 
         <section class="panel">
             <h2>1. Bereich wählen</h2>
@@ -43,8 +52,6 @@ declare(strict_types=1);
             </div>
             <button id="btn-select" class="btn primary">Bereich aufziehen</button>
             <p id="selection-info" class="muted">Noch kein Bereich gewählt (max. 15 × 15 km).</p>
-            <button id="btn-import" class="btn">Projekt importieren</button>
-            <input type="file" id="opt-import-file" accept="application/json,.json" hidden>
         </section>
 
         <section class="panel">
@@ -55,25 +62,12 @@ declare(strict_types=1);
                 <button id="btn-label" class="btn">🏷️ Tafel</button>
                 <button id="btn-clear-overlays" class="btn">Alle löschen</button>
             </div>
-            <label class="field">
-                <span>Tafel-Text</span>
-                <input type="text" id="opt-label-text" value="Gipfel" maxlength="40">
-            </label>
-            <div class="color-row">
-                <label class="color-field">
-                    <span>Markerfarbe</span>
-                    <input type="color" id="opt-marker-color" value="#e5484d">
-                </label>
-                <label class="color-field">
-                    <span>Wegfarbe</span>
-                    <input type="color" id="opt-path-color" value="#ff7733">
-                </label>
-            </div>
             <ul id="overlay-list" class="overlay-list" hidden></ul>
             <p class="muted">Marker: Klick setzt, Ziehen verschiebt. Weg: Klicks setzen Punkte,
                 Doppelklick beendet; danach Punkte ziehen, „+"-Punkte einfügen, Rechtsklick
-                löscht einen Punkt. Tafel: Klick setzt eine Ortstafel mit dem eingegebenen
-                Text, Ziehen verschiebt sie. Gelöscht wird einzeln über die Liste.</p>
+                löscht einen Punkt. Tafel: Klick setzt eine Ortstafel, Ziehen verschiebt sie.
+                Farbe und Text lassen sich nach dem Setzen in der Liste anpassen; gelöscht
+                wird ebenfalls dort.</p>
         </section>
 
         <section class="panel">
@@ -110,6 +104,10 @@ declare(strict_types=1);
                     <option value="rock">Fels</option>
                     <option value="strata">Gesteinsschichten</option>
                 </select>
+            </label>
+            <label class="field">
+                <span>Sockel-Relief <output id="out-base-relief">100 %</output></span>
+                <input type="range" id="opt-base-relief" min="0" max="200" step="5" value="100">
             </label>
             <div class="color-row">
                 <label class="color-field">
@@ -221,8 +219,8 @@ declare(strict_types=1);
         <nav id="view-tabs">
             <button id="tab-map" class="tab active">Karte</button>
             <button id="tab-3d" class="tab" disabled>3D-Ansicht</button>
-            <button id="btn-save-view" class="tab" disabled title="Aktuelle Kameraposition als Startposition speichern">📷 Start setzen</button>
-            <button id="btn-goto-view" class="tab" disabled title="Zur gespeicherten Startposition springen">🎯 Zum Start</button>
+            <button id="btn-save-view" class="tab" disabled title="Aktuelle Kameraposition als Startposition speichern">📷 Kamera Start setzen</button>
+            <button id="btn-goto-view" class="tab" disabled title="Zur gespeicherten Startposition springen">🎯 Zum Kamera Start</button>
             <button id="btn-iso" class="tab" disabled title="Zwischen isometrischer und perspektivischer Ansicht wechseln">◇ Isometrisch</button>
         </nav>
         <div id="map" class="view active"></div>

@@ -42,6 +42,54 @@ html, body {
     margin: 0 0 4px;
 }
 
+#app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+#app-menu {
+    position: relative;
+}
+
+#btn-menu {
+    padding: 4px 10px;
+    font-size: 16px;
+    line-height: 1.4;
+}
+
+#app-menu-dropdown {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    min-width: 190px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 6px;
+    z-index: 1200;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.menu-item:hover {
+    background: var(--panel-border);
+}
+
 .panel {
     background: var(--panel);
     border: 1px solid var(--panel-border);
@@ -263,14 +311,54 @@ html, body {
 }
 
 .overlay-list .dot {
-    width: 10px;
-    height: 10px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     flex-shrink: 0;
+    border: none;
+    padding: 0;
+    background: none;
+    cursor: pointer;
+}
+
+/* Farbpunkt ist ein <input type="color">: Swatch rund und randlos */
+.overlay-list input.dot::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.overlay-list input.dot::-webkit-color-swatch {
+    border: none;
+    border-radius: 50%;
+}
+
+.overlay-list input.dot::-moz-color-swatch {
+    border: none;
+    border-radius: 50%;
 }
 
 .overlay-list .name {
     flex: 1;
+}
+
+/* Tafel-Text direkt in der Zeile editierbar */
+.overlay-list .name-input {
+    min-width: 0;
+    background: none;
+    border: none;
+    border-bottom: 1px dashed transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    padding: 0;
+}
+
+.overlay-list .name-input:hover {
+    border-bottom-color: var(--muted);
+}
+
+.overlay-list .name-input:focus {
+    outline: none;
+    border-bottom-color: var(--accent);
 }
 
 .overlay-list .del {

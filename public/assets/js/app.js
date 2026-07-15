@@ -356,6 +356,12 @@ map.on('mouseup', (e) => {
 const markers = []; // { id, latlng, color, layer }
 const paths = [];   // { id, latlngs: [L.LatLng, …], color, layer }
 const labels = [];  // { id, latlng, text, layer }
+
+// Startwerte neuer Elemente — angepasst wird danach direkt in der Liste
+const DEFAULT_MARKER_COLOR = '#e5484d';
+const DEFAULT_PATH_COLOR = '#ff7733';
+const DEFAULT_LABEL_TEXT = 'Gipfel';
+
 let markerSeq = 0;
 let pathSeq = 0;
 let labelSeq = 0;
@@ -405,7 +411,7 @@ function createMarker(latlng, color, id) {
 }
 
 function addMarker(latlng) {
-    createMarker(latlng, $('opt-marker-color').value, ++markerSeq);
+    createMarker(latlng, DEFAULT_MARKER_COLOR, ++markerSeq);
     renderOverlayList();
     updateOverlays3D();
 }
@@ -438,8 +444,7 @@ function createLabel(latlng, text, id) {
 }
 
 function addLabel(latlng) {
-    const text = ($('opt-label-text').value || '').trim() || 'Ortstafel';
-    createLabel(latlng, text, ++labelSeq);
+    createLabel(latlng, DEFAULT_LABEL_TEXT, ++labelSeq);
     renderOverlayList();
     updateOverlays3D();
 }
@@ -499,7 +504,7 @@ function createPath(latlngs, color, id) {
 
 function addPathPoint(latlng) {
     if (!draftPath) {
-        const color = $('opt-path-color').value;
+        const color = DEFAULT_PATH_COLOR;
         draftPath = {
             latlngs: [],
             color,
@@ -527,29 +532,83 @@ function finishPath() {
     updateOverlays3D();
 }
 
-/** Liste im Seitenpanel: alle Marker/Wege mit Farbe und Einzel-Löschen. */
+/**
+ * Liste im Seitenpanel: Farbe (Marker/Weg) und Text (Tafel) jedes Elements
+ * werden direkt in der Zeile bearbeitet; die Karte folgt live, das 3D-Modell
+ * beim Abschliessen der Eingabe (change).
+ */
 function renderOverlayList() {
     const list = $('overlay-list');
     list.innerHTML = '';
-    const addRow = (label, color, onDelete) => {
+
+    const addRow = (label, onDelete, ...controls) => {
         const li = document.createElement('li');
-        const dot = document.createElement('span');
-        dot.className = 'dot';
-        dot.style.background = color;
-        const name = document.createElement('span');
-        name.className = 'name';
-        name.textContent = label;
         const del = document.createElement('button');
         del.className = 'del';
         del.title = `${label} löschen`;
         del.textContent = '✕';
         del.addEventListener('click', onDelete);
-        li.append(dot, name, del);
+        li.append(...controls, del);
         list.appendChild(li);
     };
-    for (const m of markers) addRow(`Marker ${m.id}`, m.color, () => removeMarker(m));
-    for (const p of paths) addRow(`Weg ${p.id}`, p.color, () => removePath(p));
-    for (const l of labels) addRow(`Tafel ${l.id} — ${l.text}`, '#ffffff', () => removeLabel(l));
+    const colorInput = (value, title, onInput) => {
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.className = 'dot';
+        input.value = value;
+        input.title = title;
+        input.addEventListener('input', () => onInput(input.value));
+        input.addEventListener('change', updateOverlays3D);
+        return input;
+    };
+    const nameSpan = (text) => {
+        const span = document.createElement('span');
+        span.className = 'name';
+        span.textContent = text;
+        return span;
+    };
+
+    for (const m of markers) {
+        const color = colorInput(m.color, 'Markerfarbe ändern', (v) => {
+            m.color = v;
+            m.layer.setIcon(markerIcon(v));
+        });
+        addRow(`Marker ${m.id}`, () => removeMarker(m), color, nameSpan(`Marker ${m.id}`));
+    }
+
+    for (const p of paths) {
+        const color = colorInput(p.color, 'Wegfarbe ändern', (v) => {
+            p.color = v;
+            p.layer.setStyle({ color: v });
+        });
+        addRow(`Weg ${p.id}`, () => removePath(p), color, nameSpan(`Weg ${p.id}`));
+    }
+
+    for (const l of labels) {
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = '#ffffff';
+        const text = document.createElement('input');
+        text.type = 'text';
+        text.className = 'name name-input';
+        text.maxLength = 40;
+        text.value = l.text;
+        text.title = 'Tafel-Text ändern';
+        text.addEventListener('input', () => {
+            l.text = text.value;
+            l.layer.setIcon(labelIcon(l.text));
+        });
+        text.addEventListener('change', () => {
+            if (!text.value.trim()) {
+                l.text = DEFAULT_LABEL_TEXT;
+                text.value = l.text;
+                l.layer.setIcon(labelIcon(l.text));
+            }
+            updateOverlays3D();
+        });
+        addRow(`Tafel ${l.id}`, () => removeLabel(l), dot, text);
+    }
+
     list.hidden = list.children.length === 0;
 }
 
@@ -833,6 +892,12 @@ $('opt-base').addEventListener('input', (e) => {
 
 $('opt-base-color').addEventListener('input', (e) => viewer.setBaseColor(e.target.value));
 $('opt-base-style').addEventListener('change', (e) => viewer.setBaseStyle(e.target.value));
+
+$('opt-base-relief').addEventListener('input', (e) => {
+    $('out-base-relief').textContent = `${e.target.value} %`;
+    viewer.setBaseRelief(Number(e.target.value));
+});
+
 $('opt-ground-color').addEventListener('input', (e) => viewer.setGroundColor(e.target.value));
 $('opt-shadow-color').addEventListener('input', (e) => viewer.setShadowColor(e.target.value));
 
@@ -910,10 +975,10 @@ $('opt-zoom-limit').addEventListener('input', (e) => {
 
 const SETTING_IDS = [
     'opt-style', 'opt-resolution', 'opt-exaggeration', 'opt-base',
-    'opt-base-style', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
+    'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
     'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-dist',
     'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity',
-    'opt-marker-color', 'opt-path-color', 'opt-label-text', 'opt-model-width',
+    'opt-model-width',
     'opt-tilt-limit', 'opt-zoom-limit',
 ];
 
@@ -1044,7 +1109,31 @@ function applyProject(projekt) {
     if (selection) $('btn-generate').click();
 }
 
-$('btn-import').addEventListener('click', () => $('opt-import-file').click());
+// Burger-Menü neben dem Titel: öffnet das Dropdown; Klick daneben oder
+// Escape schliesst es wieder
+const menuDropdown = $('app-menu-dropdown');
+
+function closeMenu() {
+    menuDropdown.hidden = true;
+}
+
+$('btn-menu').addEventListener('click', (e) => {
+    e.stopPropagation();
+    menuDropdown.hidden = !menuDropdown.hidden;
+});
+
+document.addEventListener('click', (e) => {
+    if (!menuDropdown.hidden && !menuDropdown.contains(e.target)) closeMenu();
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMenu();
+});
+
+$('btn-import').addEventListener('click', () => {
+    closeMenu();
+    $('opt-import-file').click();
+});
 
 $('opt-import-file').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
