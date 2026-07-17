@@ -960,6 +960,11 @@ $('opt-cloud-opacity').addEventListener('input', (e) => {
     viewer.setCloudOpacity(Number(e.target.value));
 });
 
+$('opt-cloud-rain').addEventListener('input', (e) => {
+    $('out-cloud-rain').textContent = `${e.target.value} %`;
+    viewer.setCloudRain(Number(e.target.value));
+});
+
 // Export-Sichtbegrenzungen (wirken nur im exportierten Viewer)
 $('opt-tilt-limit').addEventListener('input', (e) => {
     $('out-tilt-limit').textContent = `${e.target.value}°`;
@@ -977,7 +982,7 @@ const SETTING_IDS = [
     'opt-style', 'opt-resolution', 'opt-exaggeration', 'opt-base',
     'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
     'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-dist',
-    'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity',
+    'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-rain',
     'opt-model-width',
     'opt-tilt-limit', 'opt-zoom-limit',
 ];
@@ -1030,6 +1035,7 @@ function collectViewerConfig() {
             speed: Number($('opt-cloud-speed').value),
             size: Number($('opt-cloud-size').value),
             opacity: Number($('opt-cloud-opacity').value),
+            rain: Number($('opt-cloud-rain').value),
         },
         cloudBaseY: viewer.cloudBaseY(),
         cloudDepth: viewer.worldDepth,

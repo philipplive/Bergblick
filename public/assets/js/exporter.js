@@ -238,13 +238,14 @@ export function buildWebViewerHTML() {
     karte.contentWindow.terrainViewer.getVisible('weg-1');  // true | false | null
     karte.contentWindow.terrainViewer.list();
 
-  Wolken steuern (alle Felder optional: count, speed, size, opacity):
-    karte.contentWindow.postMessage({ type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60 }, '*');
+  Wolken steuern (alle Felder optional: count, speed, size, opacity, rain):
+    karte.contentWindow.postMessage({ type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60, rain: 40 }, '*');
     karte.contentWindow.postMessage({ type: 'clouds', count: 0 }, '*'); // Wolken aus
+    karte.contentWindow.postMessage({ type: 'clouds', rain: 0 }, '*');  // Regen aus
 
   Bei gleicher Herkunft auch direkt:
     karte.contentWindow.terrainViewer.setClouds({ opacity: 50 });
-    karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity }
+    karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity, rain }
 -->
 <html lang="de">
 <head>
@@ -488,14 +489,19 @@ canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; }, {
 let tiltMaxPolar = Math.PI;
 
 // --- Wolken (weiche Sprite-Puffs + unsichtbare Schattenwerfer) ---
-const cloudConfig = { count: 0, speed: 50, size: 100, opacity: 90, ...CONFIG.clouds };
+const cloudConfig = { count: 0, speed: 50, size: 100, opacity: 90, rain: 0, ...CONFIG.clouds };
 const CLOUD_BASE_Y = CONFIG.cloudBaseY;
 const CLOUD_DEPTH = CONFIG.cloudDepth;
 const CLOUD_LIMIT = 85;
 const CLOUD_FADE_DIST = 30;
+const RAIN_MAX_DROPS = 60;
+const RAIN_FALL_SPEED = 42;
+const RAIN_DROP_LENGTH = 1.4;
 
 const cloudGroup = new THREE.Group();
 scene.add(cloudGroup);
+const rainGroup = new THREE.Group();
+scene.add(rainGroup);
 const cloudGeometry = new THREE.SphereGeometry(1, 14, 10);
 const cloudShadowMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
 
@@ -566,11 +572,44 @@ function makeCloud() {
     return cloud;
 }
 
+// Regen unter einer Wolke: kurze, fallende Linien in Weltkoordinaten; über den
+// drawRange wird nur der der Regenstärke entsprechende Anteil gezeichnet
+function makeRain() {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(RAIN_MAX_DROPS * 6), 3));
+    geometry.setDrawRange(0, 0);
+    const material = new THREE.LineBasicMaterial({
+        color: 0xa9c2d8,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+    });
+    const rain = new THREE.LineSegments(geometry, material);
+    rain.frustumCulled = false; // Positionen ändern sich pro Frame
+    const spread = 7 * (cloudConfig.size / 100);
+    const drops = [];
+    for (let i = 0; i < RAIN_MAX_DROPS; i++) {
+        drops.push({
+            x: (Math.random() - 0.5) * 2 * spread,
+            z: (Math.random() - 0.5) * spread,
+            y: Math.random() * CLOUD_BASE_Y,
+            speed: 0.75 + Math.random() * 0.5,
+        });
+    }
+    rain.userData.drops = drops;
+    return rain;
+}
+
 function rebuildClouds() {
     for (const cloud of cloudGroup.children) {
         if (cloud.userData.material) cloud.userData.material.dispose();
     }
     cloudGroup.clear();
+    for (const rain of rainGroup.children) {
+        rain.geometry.dispose();
+        rain.material.dispose();
+    }
+    rainGroup.clear();
     for (let i = 0; i < cloudConfig.count; i++) {
         const cloud = makeCloud();
         cloud.userData.speedFactor = 0.7 + Math.random() * 0.6;
@@ -583,7 +622,42 @@ function rebuildClouds() {
             (Math.random() - 0.5) * CLOUD_DEPTH * 0.9
         );
         cloudGroup.add(cloud);
+        const rain = makeRain();
+        cloud.userData.rain = rain;
+        rainGroup.add(rain);
     }
+}
+
+// Tropfen unter einer Wolke fallen lassen; Dichte gemäss Regenstärke
+function animateRain(cloud, fade, delta) {
+    const rain = cloud.userData.rain;
+    if (!rain) return;
+    const intensity = cloudConfig.rain;
+    rain.visible = intensity > 0 && fade > 0.02;
+    if (!rain.visible) return;
+
+    rain.position.x = cloud.position.x;
+    rain.position.z = cloud.position.z;
+    const top = cloud.position.y - 2; // knapp unter der Wolkenbasis starten
+    const drops = rain.userData.drops;
+    const active = Math.max(1, Math.round(drops.length * (intensity / 100)));
+    rain.geometry.setDrawRange(0, active * 2);
+
+    const positions = rain.geometry.attributes.position;
+    for (let i = 0; i < active; i++) {
+        const drop = drops[i];
+        drop.y -= RAIN_FALL_SPEED * drop.speed * delta;
+        if (drop.y < 0 || drop.y > top) drop.y = top * (0.85 + Math.random() * 0.15);
+        const j = i * 6;
+        positions.array[j] = drop.x;
+        positions.array[j + 1] = Math.min(top, drop.y + RAIN_DROP_LENGTH);
+        positions.array[j + 2] = drop.z;
+        positions.array[j + 3] = drop.x;
+        positions.array[j + 4] = drop.y;
+        positions.array[j + 5] = drop.z;
+    }
+    positions.needsUpdate = true;
+    rain.material.opacity = 0.5 * fade;
 }
 
 function animateClouds(delta) {
@@ -610,6 +684,7 @@ function animateClouds(delta) {
                     .multiplyScalar(Math.max(0.001, fade));
             }
         }
+        animateRain(cloud, fade, delta);
     }
 }
 rebuildClouds();
@@ -642,7 +717,7 @@ const terrainViewer = {
     },
     setClouds(options = {}) {
         const previousCount = cloudConfig.count;
-        for (const key of ['count', 'speed', 'size', 'opacity']) {
+        for (const key of ['count', 'speed', 'size', 'opacity', 'rain']) {
             if (typeof options[key] === 'number' && Number.isFinite(options[key])) {
                 cloudConfig[key] = Math.max(0, options[key]);
             }

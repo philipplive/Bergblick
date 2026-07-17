@@ -47,10 +47,11 @@ karte.contentWindow.postMessage({ type: 'overlay-list' }, '*');
 
 // Wolken steuern (alle Felder optional)
 karte.contentWindow.postMessage(
-  { type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60 },
+  { type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60, rain: 40 },
   '*'
 );
 karte.contentWindow.postMessage({ type: 'clouds', count: 0 }, '*'); // Wolken aus
+karte.contentWindow.postMessage({ type: 'clouds', rain: 0 }, '*');  // Regen aus
 </script>
 ```
 
@@ -65,8 +66,8 @@ viewer.toggle('marker-2');
 viewer.getVisible('weg-1');   // true | false | null
 viewer.list();                // alle steuerbaren Namen
 
-viewer.setClouds({ opacity: 50 });
-viewer.getClouds();           // { count, speed, size, opacity }
+viewer.setClouds({ opacity: 50, rain: 40 });
+viewer.getClouds();           // { count, speed, size, opacity, rain }
 ```
 
 Weitere Einstellungen (Hintergrundfarbe, Marker-/Wegfarben, Licht, Schatten) lassen sich direkt in der mitexportierten `projekt.json` anpassen, ohne erneut exportieren zu müssen.

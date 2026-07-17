@@ -63,6 +63,9 @@ export function patchShadowShader(shaderChunkLib) {
 patchShadowShader(THREE.ShaderChunk);
 const CLOUD_LIMIT = WORLD_WIDTH * 0.85; // Zugstrecke der Wolken (±x)
 const CLOUD_FADE_DIST = 30;             // Strecke für Ein-/Ausblenden am Rand
+const RAIN_MAX_DROPS = 60;              // Tropfen pro Wolke bei 100 % Regen
+const RAIN_FALL_SPEED = 42;             // Fallgeschwindigkeit (Einheiten pro Sekunde)
+const RAIN_DROP_LENGTH = 1.4;           // Länge eines Tropfen-Strichs
 
 /** Weisses Textschild mit schwarzem Text und Rahmen für Ortstafeln. */
 export function makeLabelCanvas(text) {
@@ -245,6 +248,7 @@ export class TerrainViewer {
             cloudSpeed: 50,   // Prozent
             cloudSize: 100,   // Prozent
             cloudOpacity: 90, // Deckkraft in Prozent
+            cloudRain: 0,     // Regenstärke in Prozent (0 = kein Regen)
         };
 
         this.scene = new THREE.Scene();
@@ -361,6 +365,11 @@ export class TerrainViewer {
             colorWrite: false, // im Farbbild unsichtbar, im Schattenpass vorhanden
             depthWrite: false,
         });
+
+        // Regen: pro Wolke ein Bündel fallender Tropfen-Striche (LineSegments in
+        // Weltkoordinaten, folgt der Wolke) — Dichte steuert der Regen-Regler
+        this.rainGroup = new THREE.Group();
+        this.scene.add(this.rainGroup);
 
         this.terrainMesh = null;
         this.skirtMesh = null;
@@ -802,12 +811,44 @@ export class TerrainViewer {
         return cloud;
     }
 
-    /** Baut die Wolkendecke gemäss Anzahl/Grösse neu auf. */
+    /**
+     * Regen unter einer Wolke: kurze, fallende Linien in Weltkoordinaten.
+     * Die Tropfen aktualisiert animateRain() pro Frame; über den drawRange
+     * wird nur der der Regenstärke entsprechende Anteil gezeichnet.
+     */
+    makeRain() {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(RAIN_MAX_DROPS * 6), 3));
+        geometry.setDrawRange(0, 0);
+        const material = new THREE.LineBasicMaterial({
+            color: 0xa9c2d8,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+        });
+        const rain = new THREE.LineSegments(geometry, material);
+        rain.frustumCulled = false; // Positionen ändern sich pro Frame
+        const spread = 7 * (this.options.cloudSize / 100);
+        rain.userData.drops = Array.from({ length: RAIN_MAX_DROPS }, () => ({
+            x: (Math.random() - 0.5) * 2 * spread,
+            z: (Math.random() - 0.5) * spread,
+            y: Math.random() * this.cloudBaseY(),
+            speed: 0.75 + Math.random() * 0.5,
+        }));
+        return rain;
+    }
+
+    /** Baut die Wolkendecke (samt Regen) gemäss Anzahl/Grösse neu auf. */
     rebuildClouds() {
         for (const cloud of this.cloudGroup.children) {
             cloud.userData.material?.dispose();
         }
         this.cloudGroup.clear();
+        for (const rain of this.rainGroup.children) {
+            rain.geometry.dispose();
+            rain.material.dispose();
+        }
+        this.rainGroup.clear();
         if (!this.model || this.options.cloudCount <= 0) return;
 
         for (let i = 0; i < this.options.cloudCount; i++) {
@@ -822,6 +863,9 @@ export class TerrainViewer {
                 (Math.random() - 0.5) * this.worldDepth * 0.9
             );
             this.cloudGroup.add(cloud);
+            const rain = this.makeRain();
+            cloud.userData.rain = rain;
+            this.rainGroup.add(rain);
         }
     }
 
@@ -864,7 +908,40 @@ export class TerrainViewer {
                         .multiplyScalar(Math.max(0.001, fade));
                 }
             }
+            this.animateRain(cloud, fade, delta);
         }
+    }
+
+    /** Tropfen unter einer Wolke fallen lassen; Dichte gemäss Regenstärke. */
+    animateRain(cloud, fade, delta) {
+        const rain = cloud.userData.rain;
+        if (!rain) return;
+        const intensity = this.options.cloudRain;
+        rain.visible = intensity > 0 && fade > 0.02;
+        if (!rain.visible) return;
+
+        rain.position.x = cloud.position.x;
+        rain.position.z = cloud.position.z;
+        const top = cloud.position.y - 2; // knapp unter der Wolkenbasis starten
+        const drops = rain.userData.drops;
+        const active = Math.max(1, Math.round(drops.length * (intensity / 100)));
+        rain.geometry.setDrawRange(0, active * 2);
+
+        const positions = rain.geometry.attributes.position;
+        for (let i = 0; i < active; i++) {
+            const drop = drops[i];
+            drop.y -= RAIN_FALL_SPEED * drop.speed * delta;
+            if (drop.y < 0 || drop.y > top) drop.y = top * (0.85 + Math.random() * 0.15);
+            const j = i * 6;
+            positions.array[j] = drop.x;
+            positions.array[j + 1] = Math.min(top, drop.y + RAIN_DROP_LENGTH);
+            positions.array[j + 2] = drop.z;
+            positions.array[j + 3] = drop.x;
+            positions.array[j + 4] = drop.y;
+            positions.array[j + 5] = drop.z;
+        }
+        positions.needsUpdate = true;
+        rain.material.opacity = 0.5 * fade;
     }
 
     setCloudCount(count) {
@@ -885,6 +962,10 @@ export class TerrainViewer {
 
     setCloudOpacity(percent) {
         this.options.cloudOpacity = percent; // greift im nächsten Animationsframe
+    }
+
+    setCloudRain(percent) {
+        this.options.cloudRain = percent; // greift im nächsten Animationsframe
     }
 
     /**
