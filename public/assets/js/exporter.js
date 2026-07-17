@@ -451,6 +451,10 @@ if (CONFIG.groundVisible) {
         })
     );
     ground.position.y = -0.6;
+    // Immer als Erstes unter den transparenten Objekten zeichnen: three.js
+    // sortiert Transparentes nach Objektursprung, wodurch die riesige Platte
+    // je nach Blickwinkel sonst ÜBER die Tafel-Sprites gemalt würde
+    ground.renderOrder = -2;
     scene.add(ground);
 
     const shadowCatcher = new THREE.Mesh(
@@ -459,6 +463,7 @@ if (CONFIG.groundVisible) {
     );
     shadowCatcher.position.y = -0.3;
     shadowCatcher.receiveShadow = true;
+    shadowCatcher.renderOrder = -1; // wie ground: nie über Sprites malen
     // an der Lichtrichtung ausrichten und auf den Schattenkamera-Bereich
     // begrenzen, sonst zeichnet sich dessen Grenze als Saum ab
     const azimuth = Math.atan2(sun.position.z, sun.position.x);

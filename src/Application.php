@@ -16,6 +16,10 @@ final class Application {
 		return self::rootDir ().'/cache';
 	}
 
+	public static function publicDir (): string {
+		return self::rootDir ().'/public';
+	}
+
 	public static function templateDir (): string {
 		return self::rootDir ().'/templates';
 	}

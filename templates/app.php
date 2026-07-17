@@ -201,11 +201,13 @@ declare(strict_types=1);
                 <button id="btn-export-png" class="btn">Screenshot</button>
                 <button id="btn-export-heightmap" class="btn">Heightmap</button>
                 <button id="btn-export-web" class="btn">Web (HTML)</button>
+                <button id="btn-export-test" class="btn">Web testen</button>
                 <button id="btn-export-project" class="btn">Projekt (JSON)</button>
             </div>
             <p class="muted">Web-Export: ZIP mit Viewer-HTML, 3D-Modell und Texturen als separate
                 Dateien — entpacken, alles zusammen hochladen und per
-                <code>&lt;iframe&gt;</code> einbinden.</p>
+                <code>&lt;iframe&gt;</code> einbinden. „Web testen“ legt denselben Export
+                direkt unter <code>/test/</code> ab und öffnet ihn im neuen Tab.</p>
         </section>
 
         <footer>

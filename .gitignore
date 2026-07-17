@@ -6,3 +6,4 @@ composer.lock
 *.log
 cache/
 .gitignore
+/public/test/

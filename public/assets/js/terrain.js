@@ -293,6 +293,10 @@ export class TerrainViewer {
             })
         );
         this.groundMesh.position.y = -0.6;
+        // Immer als Erstes unter den transparenten Objekten zeichnen: three.js
+        // sortiert Transparentes nach Objektursprung, wodurch die riesige Platte
+        // je nach Blickwinkel sonst ÜBER die Tafel-Sprites gemalt würde
+        this.groundMesh.renderOrder = -2;
         this.scene.add(this.groundMesh);
 
         // Deckkraft fest auf 1 — die Schattenstärke wird über sun.shadow.intensity
@@ -303,6 +307,7 @@ export class TerrainViewer {
         );
         this.shadowMesh.position.y = -0.3;
         this.shadowMesh.receiveShadow = true;
+        this.shadowMesh.renderOrder = -1; // wie groundMesh: nie über Sprites malen
         this.scene.add(this.shadowMesh);
 
         this.setShadowHardness(this.options.shadowHardness);

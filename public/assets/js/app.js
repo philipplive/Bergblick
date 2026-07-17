@@ -1201,48 +1201,85 @@ function canvasToBytes(canvas, type, quality) {
     });
 }
 
+/**
+ * Sammelt alle Dateien des Web-Exports (Viewer-HTML, Modell, projekt.json,
+ * Texturen) — gemeinsame Basis für den ZIP-Download und den Test-Export.
+ */
+async function collectWebExportFiles() {
+    const glb = await viewer.exportGLB();
+    const viewerConfig = collectViewerConfig();
+    const encoder = new TextEncoder();
+
+    const files = [
+        { name: 'terrain-3d.html', data: encoder.encode(buildWebViewerHTML()) },
+        { name: 'terrain.glb', data: new Uint8Array(glb) },
+    ];
+
+    // Projektdatei: steuert den Viewer und ist im Editor wieder importierbar
+    const projekt = collectProject();
+    projekt.viewer = viewerConfig;
+    files.push({ name: 'projekt.json', data: encoder.encode(JSON.stringify(projekt, null, 2)) });
+
+    // Texturen als separate Dateien (werden vom Viewer zur Laufzeit geladen)
+    if (viewerConfig.terrainTexture) {
+        files.push({
+            name: viewerConfig.terrainTexture,
+            data: await canvasToBytes(viewer.terrainMesh.material.map.image, 'image/jpeg', 0.9),
+        });
+    }
+    if (viewerConfig.skirtTexture) {
+        files.push({
+            name: viewerConfig.skirtTexture,
+            data: await canvasToBytes(viewer.skirtMesh.material.map.image, 'image/png'),
+        });
+    }
+    if (viewerConfig.backgroundImage) {
+        files.push({
+            name: viewerConfig.backgroundImage,
+            data: await canvasToBytes(viewer.backgroundTexture.image, 'image/jpeg', 0.88),
+        });
+    }
+    return files;
+}
+
 $('btn-export-web').addEventListener('click', async () => {
     if (!currentModel) return;
     setStatus('Erzeuge Web-Export …');
     try {
-        const glb = await viewer.exportGLB();
-        const viewerConfig = collectViewerConfig();
-        const encoder = new TextEncoder();
-
-        const files = [
-            { name: 'terrain-3d.html', data: encoder.encode(buildWebViewerHTML()) },
-            { name: 'terrain.glb', data: new Uint8Array(glb) },
-        ];
-
-        // Projektdatei: steuert den Viewer und ist im Editor wieder importierbar
-        const projekt = collectProject();
-        projekt.viewer = viewerConfig;
-        files.push({ name: 'projekt.json', data: encoder.encode(JSON.stringify(projekt, null, 2)) });
-
-        // Texturen als separate Dateien (werden vom Viewer zur Laufzeit geladen)
-        if (viewerConfig.terrainTexture) {
-            files.push({
-                name: viewerConfig.terrainTexture,
-                data: await canvasToBytes(viewer.terrainMesh.material.map.image, 'image/jpeg', 0.9),
-            });
-        }
-        if (viewerConfig.skirtTexture) {
-            files.push({
-                name: viewerConfig.skirtTexture,
-                data: await canvasToBytes(viewer.skirtMesh.material.map.image, 'image/png'),
-            });
-        }
-        if (viewerConfig.backgroundImage) {
-            files.push({
-                name: viewerConfig.backgroundImage,
-                data: await canvasToBytes(viewer.backgroundTexture.image, 'image/jpeg', 0.88),
-            });
-        }
-
+        const files = await collectWebExportFiles();
         downloadBlob(new Blob([buildZip(files)], { type: 'application/zip' }), 'terrain-3d.zip');
         setStatus('Web-Export (ZIP) erstellt — entpacken, komplett hochladen, per <iframe> einbinden.');
     } catch (err) {
         console.error(err);
         setStatus(`Fehler beim Web-Export: ${err.message}`);
+    }
+});
+
+$('btn-export-test').addEventListener('click', async () => {
+    if (!currentModel) return;
+    // Tab sofort im Klick-Handler öffnen, sonst greift der Popup-Blocker
+    const testWindow = window.open('', '_blank');
+    setStatus('Erzeuge Test-Export …');
+    try {
+        const upload = async (url, body) => {
+            const response = await fetch(url, { method: 'POST', body });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result.ok) {
+                throw new Error(result.error || `Server antwortete mit ${response.status}`);
+            }
+        };
+        const files = await collectWebExportFiles();
+        await upload('api/test-export.php?action=clear');
+        for (const file of files) {
+            await upload(`api/test-export.php?name=${encodeURIComponent(file.name)}`, file.data);
+        }
+        const testUrl = `test/terrain-3d.html?v=${Date.now()}`;
+        if (testWindow) testWindow.location = testUrl;
+        else window.open(testUrl, '_blank');
+        setStatus('Test-Export unter /test/ abgelegt und im neuen Tab geöffnet.');
+    } catch (err) {
+        console.error(err);
+        if (testWindow) testWindow.close();
+        setStatus(`Fehler beim Test-Export: ${err.message}`);
     }
 });
