@@ -993,6 +993,11 @@ $('opt-lightning').addEventListener('input', (e) => {
     viewer.setCloudLightning(Number(e.target.value));
 });
 
+$('opt-fog').addEventListener('input', (e) => {
+    $('out-fog').textContent = `${e.target.value} %`;
+    viewer.setFogDensity(Number(e.target.value));
+});
+
 // Export-Sichtbegrenzungen (wirken nur im exportierten Viewer)
 $('opt-tilt-limit').addEventListener('input', (e) => {
     $('out-tilt-limit').textContent = `${e.target.value}°`;
@@ -1012,7 +1017,7 @@ const SETTING_IDS = [
     'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
     'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev', 'opt-exposure',
     'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-rain',
-    'opt-lightning',
+    'opt-lightning', 'opt-fog',
     'opt-model-width',
     'opt-tilt-limit', 'opt-zoom-limit',
 ];
@@ -1072,6 +1077,9 @@ function collectViewerConfig() {
         cloudBaseY: viewer.cloudBaseY(),
         cloudDepth: viewer.worldDepth,
         rainFloorY: viewer.groundOffsetY(),
+        fogDensity: Number($('opt-fog').value),
+        fogBaseY: viewer.fogBaseY(),
+        fogBandHeight: viewer.fogBandHeight(),
         labels: viewer.getLabelPlacements(),
         contactShadows: viewer.getContactShadowPlacements(),
         contactShadowHardness: Number($('opt-shadow-hardness').value),

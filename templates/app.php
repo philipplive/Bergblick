@@ -199,6 +199,10 @@ declare(strict_types=1);
                 <input type="range" id="opt-lightning" min="0" max="100" step="1" value="0">
             </label>
             <label class="field">
+                <span>Nebelschwaden <output id="out-fog">0 %</output></span>
+                <input type="range" id="opt-fog" min="0" max="100" step="1" value="0">
+            </label>
+            <label class="field">
                 <span>Export: Neigung max. ± <output id="out-tilt-limit">90°</output></span>
                 <input type="range" id="opt-tilt-limit" min="0" max="90" step="5" value="90">
             </label>

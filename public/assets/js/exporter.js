@@ -207,7 +207,8 @@ export function buildWebViewerHTML() {
   wieder laden, um das Projekt weiterzubearbeiten. Direkt in der projekt.json
   editierbar (ohne Neu-Export): Hintergrundfarbe (viewer.backdrop), Marker-
   und Wegfarben (markers[].color / paths[].color), Wolken (viewer.clouds),
-  Licht und Schatten (viewer.sunPosition / shadowRadius / shadowIntensity).
+  Nebelschwaden (viewer.fogDensity), Licht und Schatten (viewer.sunPosition /
+  shadowRadius / shadowIntensity).
 
   Einbindung auf einer Website:
     <iframe id="karte" src="terrain-3d.html" width="800" height="600" style="border:0"></iframe>
@@ -247,6 +248,14 @@ export function buildWebViewerHTML() {
   Bei gleicher Herkunft auch direkt:
     karte.contentWindow.terrainViewer.setClouds({ opacity: 50 });
     karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity, rain, lightning }
+
+  Nebelschwaden steuern (density: 0–100):
+    karte.contentWindow.postMessage({ type: 'fog', density: 60 }, '*');
+    karte.contentWindow.postMessage({ type: 'fog', density: 0 }, '*'); // Nebel aus
+
+  Bei gleicher Herkunft auch direkt:
+    karte.contentWindow.terrainViewer.setFog({ density: 60 });
+    karte.contentWindow.terrainViewer.getFog(); // { density }
 -->
 <html lang="de">
 <head>
@@ -505,10 +514,21 @@ const RAIN_DROP_LENGTH = 1.4;
 const LIGHTNING_MAX_SEGMENTS = 90;
 const LIGHTNING_DURATION = 0.3;
 
+// --- Nebelschwaden (flache, weiche Sprite-Bänder über den unteren Hanglagen) ---
+const fogConfig = { density: CONFIG.fogDensity ?? 0 };
+const FOG_BASE_Y = CONFIG.fogBaseY ?? 0;
+const FOG_BAND_HEIGHT = CONFIG.fogBandHeight ?? 8;
+const FOG_MAX_WISPS = 16;
+const FOG_LIMIT = 62;
+const FOG_FADE_DIST = 20;
+const FOG_DRIFT_SPEED = 1.6;
+
 const cloudGroup = new THREE.Group();
 scene.add(cloudGroup);
 const rainGroup = new THREE.Group();
 scene.add(rainGroup);
+const fogGroup = new THREE.Group();
+scene.add(fogGroup);
 const cloudGeometry = new THREE.SphereGeometry(1, 14, 10);
 const cloudShadowMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
 
@@ -828,6 +848,113 @@ function animateClouds(delta) {
 }
 rebuildClouds();
 
+// Sehr weiche, in die Breite gezogene Schwaden-Textur (elliptische Verläufe)
+function makeFogTexture() {
+    const fogCanvas = document.createElement('canvas');
+    fogCanvas.width = 256;
+    fogCanvas.height = 64;
+    const ctx = fogCanvas.getContext('2d');
+    const streak = (x, y, rx, ry, alpha) => {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(rx / ry, 1);
+        const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, ry);
+        gradient.addColorStop(0, 'rgba(255,255,255,' + alpha + ')');
+        gradient.addColorStop(0.55, 'rgba(255,255,255,' + (alpha * 0.4) + ')');
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(-ry, -ry, ry * 2, ry * 2);
+        ctx.restore();
+    };
+    streak(128, 34, 116, 22, 0.5);
+    for (let i = 0; i < 6; i++) {
+        streak(
+            70 + Math.random() * 116,
+            22 + Math.random() * 20,
+            20 + Math.random() * 36,
+            7 + Math.random() * 9,
+            0.15 + Math.random() * 0.25
+        );
+    }
+    return new THREE.CanvasTexture(fogCanvas);
+}
+const fogTextures = [makeFogTexture(), makeFogTexture()];
+let fogTime = 0;
+
+function makeFogWisp() {
+    const wisp = new THREE.Group();
+    const material = new THREE.SpriteMaterial({
+        map: fogTextures[Math.floor(Math.random() * fogTextures.length)],
+        transparent: true,
+        opacity: 0, // animateFog() blendet ein
+        depthWrite: false,
+    });
+    material.color.setScalar(0.9 + Math.random() * 0.1);
+    wisp.userData.material = material;
+    const parts = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < parts; i++) {
+        const sprite = new THREE.Sprite(material);
+        sprite.position.set(
+            (Math.random() - 0.5) * 16,
+            (Math.random() - 0.5) * 1.6,
+            (Math.random() - 0.5) * 6
+        );
+        const w = 14 + Math.random() * 12;
+        sprite.scale.set(w, w * (0.14 + Math.random() * 0.08), 1);
+        wisp.add(sprite);
+    }
+    return wisp;
+}
+
+// Fester Schwaden-Vorrat; wie viele sichtbar sind, steuert die Dichte pro Frame
+for (let i = 0; i < FOG_MAX_WISPS; i++) {
+    const wisp = makeFogWisp();
+    wisp.userData.speedFactor = 0.5 + Math.random() * 0.7;
+    wisp.userData.heightFraction = Math.random();
+    wisp.userData.phase = Math.random() * Math.PI * 2;
+    wisp.userData.fade = 0;
+    wisp.position.set(
+        (Math.random() * 2 - 1) * FOG_LIMIT,
+        FOG_BASE_Y,
+        (Math.random() - 0.5) * CLOUD_DEPTH * 0.85
+    );
+    fogGroup.add(wisp);
+}
+
+// Schwaden driften langsam von West nach Ost und wabern in Höhe und Deckkraft
+function animateFog(delta) {
+    const wisps = fogGroup.children;
+    const density = Math.min(100, Math.max(0, fogConfig.density));
+    const active = Math.ceil(wisps.length * (density / 100));
+    fogTime += delta;
+    const maxOpacity = 0.4 * Math.sqrt(density / 100);
+    for (let i = 0; i < wisps.length; i++) {
+        const wisp = wisps[i];
+        const data = wisp.userData;
+        data.fade = Math.min(1, Math.max(0, data.fade + (i < active ? delta : -delta) / 2.5));
+        if (data.fade <= 0) {
+            wisp.visible = false;
+            continue;
+        }
+        wisp.visible = true;
+        wisp.position.x += FOG_DRIFT_SPEED * data.speedFactor * delta;
+        if (wisp.position.x > FOG_LIMIT) {
+            wisp.position.x = -FOG_LIMIT;
+            wisp.position.z = (Math.random() - 0.5) * CLOUD_DEPTH * 0.85;
+            data.heightFraction = Math.random();
+        }
+        wisp.position.y = FOG_BASE_Y + data.heightFraction * FOG_BAND_HEIGHT
+            + Math.sin(fogTime * 0.25 + data.phase) * 0.7;
+        const positionFade = Math.max(0, Math.min(
+            1,
+            (wisp.position.x + FOG_LIMIT) / FOG_FADE_DIST,
+            (FOG_LIMIT - wisp.position.x) / FOG_FADE_DIST
+        ));
+        const pulse = 0.75 + 0.25 * Math.sin(fogTime * 0.4 + data.phase * 1.7);
+        data.material.opacity = maxOpacity * data.fade * positionFade * pulse;
+    }
+}
+
 // Schnittstelle: Marker/Wege ein-/ausblenden, Wolken steuern
 const overlayObjects = new Map();
 const terrainViewer = {
@@ -870,6 +997,13 @@ const terrainViewer = {
         return { ...cloudConfig };
     },
     getClouds: () => ({ ...cloudConfig }),
+    setFog(options = {}) {
+        if (typeof options.density === 'number' && Number.isFinite(options.density)) {
+            fogConfig.density = Math.min(100, Math.max(0, options.density));
+        }
+        return { ...fogConfig };
+    },
+    getFog: () => ({ ...fogConfig }),
 };
 window.terrainViewer = terrainViewer;
 
@@ -978,6 +1112,8 @@ window.addEventListener('message', (event) => {
         event.source.postMessage({ type: 'overlay-list', names: terrainViewer.list() }, '*');
     } else if (data.type === 'clouds') {
         terrainViewer.setClouds(data);
+    } else if (data.type === 'fog') {
+        terrainViewer.setFog(data);
     }
 });
 
@@ -1117,6 +1253,7 @@ renderer.setAnimationLoop(() => {
     const delta = clock.getDelta();
     animateClouds(delta);
     animateLightning(delta);
+    animateFog(delta);
     // Kamera nie unter die 0-Ebene (Modellboden), egal welches Neigungslimit
     // gilt: camera.y = target.y + r*cos(phi) >= 0, abhängig von Ziel und Zoom
     const r = camera.position.distanceTo(controls.target) || 1;

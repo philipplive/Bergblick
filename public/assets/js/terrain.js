@@ -68,6 +68,10 @@ const RAIN_FALL_SPEED = 42;             // Fallgeschwindigkeit (Einheiten pro Se
 const RAIN_DROP_LENGTH = 1.4;           // Länge eines Tropfen-Strichs
 const LIGHTNING_MAX_SEGMENTS = 90;      // Liniensegmente pro Blitz (Hauptkanal + Äste)
 const LIGHTNING_DURATION = 0.3;         // Sichtbarkeitsdauer eines Blitzes in Sekunden
+const FOG_MAX_WISPS = 16;               // Nebelschwaden bei 100 % Dichte
+const FOG_LIMIT = WORLD_WIDTH * 0.62;   // Driftstrecke der Schwaden (±x)
+const FOG_FADE_DIST = 20;               // Strecke für Ein-/Ausblenden am Rand
+const FOG_DRIFT_SPEED = 1.6;            // maximale Driftgeschwindigkeit (Einheiten/s)
 
 /** Weisses Textschild mit schwarzem Text und Rahmen für Ortstafeln. */
 export function makeLabelCanvas(text) {
@@ -143,6 +147,37 @@ function makePuffTexture() {
             size * (0.3 + Math.random() * 0.4),
             size * (0.12 + Math.random() * 0.18),
             0.3 + Math.random() * 0.35
+        );
+    }
+    return new THREE.CanvasTexture(canvas);
+}
+
+/** Sehr weiche, in die Breite gezogene Schwaden-Textur (elliptische Verläufe). */
+function makeFogTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const streak = (x, y, rx, ry, alpha) => {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(rx / ry, 1);
+        const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, ry);
+        gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+        gradient.addColorStop(0.55, `rgba(255,255,255,${alpha * 0.4})`);
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(-ry, -ry, ry * 2, ry * 2);
+        ctx.restore();
+    };
+    streak(128, 34, 116, 22, 0.5);
+    for (let i = 0; i < 6; i++) {
+        streak(
+            70 + Math.random() * 116,
+            22 + Math.random() * 20,
+            20 + Math.random() * 36,
+            7 + Math.random() * 9,
+            0.15 + Math.random() * 0.25
         );
     }
     return new THREE.CanvasTexture(canvas);
@@ -255,6 +290,7 @@ export class TerrainViewer {
             cloudOpacity: 90,  // Deckkraft in Prozent
             cloudRain: 0,      // Regenstärke in Prozent (0 = kein Regen)
             cloudLightning: 0, // Blitz-Intensität in Prozent (0 = keine Blitze)
+            fogDensity: 0,     // Dichte der Nebelschwaden in Prozent (0 = kein Nebel)
         };
 
         this.scene = new THREE.Scene();
@@ -380,6 +416,13 @@ export class TerrainViewer {
         this.rainGroup = new THREE.Group();
         this.scene.add(this.rainGroup);
 
+        // Nebelschwaden: flache, sehr weiche Sprite-Bänder, die langsam über
+        // die unteren Hanglagen driften — Dichte steuert der Nebel-Regler
+        this.fogGroup = new THREE.Group();
+        this.scene.add(this.fogGroup);
+        this.fogTextures = [makeFogTexture(), makeFogTexture()];
+        this.fogTime = 0;
+
         // Blitze: ein wiederverwendeter Zickzack aus Liniensegmenten plus ein
         // gepulstes Punktlicht als Szenen-Flash; Häufigkeit gemäss Blitz-Regler
         this.boltGeometry = new THREE.BufferGeometry();
@@ -413,6 +456,7 @@ export class TerrainViewer {
             const delta = this.clock.getDelta();
             this.animateClouds(delta);
             this.animateLightning(delta);
+            this.animateFog(delta);
             this.clampOrbitAboveGround();
             this.controls.update();
             this.renderer.render(this.scene, this.camera);
@@ -662,6 +706,7 @@ export class TerrainViewer {
         if (this.options.isometric) this.setIsometric(true); // Iso-Kamera neu einpassen
 
         this.rebuildClouds();
+        this.rebuildFog();
     }
 
     baseThickness() {
@@ -865,6 +910,16 @@ export class TerrainViewer {
         return this.currentPeakY() + 10;
     }
 
+    /** Untere Nebelgrenze: knapp über der Sockeloberkante. */
+    fogBaseY() {
+        return this.groundOffsetY() + this.baseThickness() + 1;
+    }
+
+    /** Höhe des Bandes, in dem die Nebelschwaden treiben (untere Hanglagen). */
+    fogBandHeight() {
+        return Math.max(4, (this.currentPeakY() - this.fogBaseY()) * 0.35);
+    }
+
     /**
      * Eine Wolke: mehrere weiche, texturierte Sprite-"Puffs" (Aussehen) plus
      * unsichtbare Kugel-Proxies, die den Wolkenschatten werfen.
@@ -973,6 +1028,105 @@ export class TerrainViewer {
         }
     }
 
+    /**
+     * Eine Nebelschwade: wenige breite, sehr weiche Sprites, die zusammen ein
+     * flaches Band ergeben. Wirft keinen Schatten und ist nicht Teil des GLB
+     * (der Web-Viewer baut die Schwaden zur Laufzeit nach).
+     */
+    makeFogWisp() {
+        const wisp = new THREE.Group();
+        const material = new THREE.SpriteMaterial({
+            map: this.fogTextures[Math.floor(Math.random() * this.fogTextures.length)],
+            transparent: true,
+            opacity: 0, // animateFog() blendet ein
+            depthWrite: false,
+        });
+        material.color.setScalar(0.9 + Math.random() * 0.1);
+        wisp.userData.material = material;
+        const parts = 3 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < parts; i++) {
+            const sprite = new THREE.Sprite(material);
+            sprite.position.set(
+                (Math.random() - 0.5) * 16,
+                (Math.random() - 0.5) * 1.6,
+                (Math.random() - 0.5) * 6
+            );
+            const w = 14 + Math.random() * 12;
+            sprite.scale.set(w, w * (0.14 + Math.random() * 0.08), 1);
+            wisp.add(sprite);
+        }
+        return wisp;
+    }
+
+    /**
+     * Baut den Schwaden-Vorrat neu auf. Es entstehen immer FOG_MAX_WISPS
+     * Schwaden; wie viele davon sichtbar sind, steuert der Dichte-Regler
+     * pro Frame in animateFog() — so flackert beim Schieben nichts.
+     */
+    rebuildFog() {
+        for (const wisp of this.fogGroup.children) {
+            wisp.userData.material?.dispose();
+        }
+        this.fogGroup.clear();
+        if (!this.model) return;
+        for (let i = 0; i < FOG_MAX_WISPS; i++) {
+            const wisp = this.makeFogWisp();
+            wisp.userData.speedFactor = 0.5 + Math.random() * 0.7;
+            wisp.userData.heightFraction = Math.random();
+            wisp.userData.phase = Math.random() * Math.PI * 2;
+            wisp.userData.fade = 0;
+            wisp.position.set(
+                (Math.random() * 2 - 1) * FOG_LIMIT,
+                this.fogBaseY(),
+                (Math.random() - 0.5) * this.worldDepth * 0.85
+            );
+            this.fogGroup.add(wisp);
+        }
+    }
+
+    /**
+     * Schwaden driften langsam von West nach Ost und wabern dabei leicht in
+     * Höhe und Deckkraft. Höhe wird pro Frame berechnet und folgt damit auch
+     * Überhöhungs-, Sockel- und Bodenabstands-Änderungen automatisch.
+     */
+    animateFog(delta) {
+        const wisps = this.fogGroup.children;
+        if (!wisps.length) return;
+        const density = Math.min(100, Math.max(0, this.options.fogDensity));
+        const active = Math.ceil(wisps.length * (density / 100));
+        this.fogTime += delta;
+        const baseY = this.fogBaseY();
+        const band = this.fogBandHeight();
+        const maxOpacity = 0.4 * Math.sqrt(density / 100);
+        for (let i = 0; i < wisps.length; i++) {
+            const wisp = wisps[i];
+            const data = wisp.userData;
+            // sanftes Ein-/Ausblenden, wenn der Regler die Anzahl ändert
+            data.fade = Math.min(1, Math.max(0, data.fade + (i < active ? delta : -delta) / 2.5));
+            if (data.fade <= 0) {
+                wisp.visible = false;
+                continue;
+            }
+            wisp.visible = true;
+            wisp.position.x += FOG_DRIFT_SPEED * data.speedFactor * delta;
+            if (wisp.position.x > FOG_LIMIT) {
+                wisp.position.x = -FOG_LIMIT;
+                wisp.position.z = (Math.random() - 0.5) * this.worldDepth * 0.85;
+                data.heightFraction = Math.random();
+            }
+            wisp.position.y = baseY + data.heightFraction * band
+                + Math.sin(this.fogTime * 0.25 + data.phase) * 0.7;
+            const positionFade = Math.max(0, Math.min(
+                1,
+                (wisp.position.x + FOG_LIMIT) / FOG_FADE_DIST,
+                (FOG_LIMIT - wisp.position.x) / FOG_FADE_DIST
+            ));
+            // leichtes An- und Abschwellen, damit die Schwaden lebendig wirken
+            const pulse = 0.75 + 0.25 * Math.sin(this.fogTime * 0.4 + data.phase * 1.7);
+            data.material.opacity = maxOpacity * data.fade * positionFade * pulse;
+        }
+    }
+
     /** Wolken folgen der Geländehöhe (z. B. bei Überhöhungs-Änderung). */
     updateCloudAltitude() {
         for (const cloud of this.cloudGroup.children) {
@@ -1075,6 +1229,10 @@ export class TerrainViewer {
 
     setCloudLightning(percent) {
         this.options.cloudLightning = percent; // greift im nächsten Animationsframe
+    }
+
+    setFogDensity(percent) {
+        this.options.fogDensity = percent; // greift im nächsten Animationsframe
     }
 
     /** Flacker-Hüllkurve eines Blitzes: zwei schnell abklingende Pulse. */
