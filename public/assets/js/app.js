@@ -861,6 +861,7 @@ $('btn-generate').addEventListener('click', async () => {
             texture: texture?.image ?? null,
             exaggeration: Number($('opt-exaggeration').value),
             basePercent: Number($('opt-base').value),
+            groundOffset: Number($('opt-ground-offset').value),
         });
         updateOverlays3D();
 
@@ -888,6 +889,11 @@ $('opt-exaggeration').addEventListener('input', (e) => {
 $('opt-base').addEventListener('input', (e) => {
     $('out-base').textContent = `${e.target.value} %`;
     viewer.setBasePercent(Number(e.target.value));
+});
+
+$('opt-ground-offset').addEventListener('input', (e) => {
+    $('out-ground-offset').textContent = `${e.target.value} %`;
+    viewer.setGroundOffset(Number(e.target.value));
 });
 
 $('opt-base-color').addEventListener('input', (e) => viewer.setBaseColor(e.target.value));
@@ -935,9 +941,9 @@ $('opt-light-rot').addEventListener('input', (e) => {
     viewer.setLightRotation(Number(e.target.value));
 });
 
-$('opt-light-dist').addEventListener('input', (e) => {
-    $('out-light-dist').textContent = e.target.value;
-    viewer.setLightDistance(Number(e.target.value));
+$('opt-light-elev').addEventListener('input', (e) => {
+    $('out-light-elev').textContent = `${e.target.value}°`;
+    viewer.setLightElevation(Number(e.target.value));
 });
 
 $('opt-clouds').addEventListener('input', (e) => {
@@ -979,9 +985,9 @@ $('opt-zoom-limit').addEventListener('input', (e) => {
 // ---------------------------------------------------------------------------
 
 const SETTING_IDS = [
-    'opt-style', 'opt-resolution', 'opt-exaggeration', 'opt-base',
+    'opt-style', 'opt-resolution', 'opt-exaggeration', 'opt-base', 'opt-ground-offset',
     'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
-    'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-dist',
+    'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev',
     'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-rain',
     'opt-model-width',
     'opt-tilt-limit', 'opt-zoom-limit',

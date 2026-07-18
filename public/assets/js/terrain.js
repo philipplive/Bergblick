@@ -3,8 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { makeSoilTexture, makeRockTexture, makeStrataTexture } from './textures.js';
 
-const WORLD_WIDTH = 100; // Modellbreite in Szenen-Einheiten
-const SUN_HEIGHT = 120;  // feste Höhe der Lichtquelle über dem Untergrund
+const WORLD_WIDTH = 100;   // Modellbreite in Szenen-Einheiten
+const SUN_DISTANCE = 160;  // fester Abstand der Lichtquelle vom Mittelpunkt
 
 /**
  * Ersatz für den PCF-Zweig im Shadow-Shader von Three.js: Poisson-Disk mit
@@ -233,6 +233,7 @@ export class TerrainViewer {
         this.options = {
             exaggeration: 1.5,
             basePercent: 15,
+            groundOffset: 0,    // Abstand des Modells zum Untergrund in % der Modellbreite
             baseColor: '#5c5148',
             baseStyle: 'color', // 'color' | 'soil' | 'rock' | 'strata'
             baseRelief: 100,    // Stärke des Sockel-Reliefs in Prozent (0 = flach)
@@ -243,7 +244,7 @@ export class TerrainViewer {
             groundVisible: true,
             transparentBackground: false,
             lightRotation: 143, // Azimut in Grad um den Mittelpunkt
-            lightDistance: 100, // horizontaler Abstand zum Mittelpunkt
+            lightElevation: 50, // Höhenwinkel in Grad über dem Horizont
             cloudCount: 6,
             cloudSpeed: 50,   // Prozent
             cloudSize: 100,   // Prozent
@@ -587,22 +588,10 @@ export class TerrainViewer {
         this.modelGroup.add(this.skirtMesh);
 
         this.updateHeights();
+        this.applyGroundOffset();
+        this.updateShadowFit();
 
-        const peakY = (max - min) * this.worldScale * this.options.exaggeration + this.baseThickness();
-
-        // Schatten-Kamera auf die Modellausdehnung einpassen
-        const extent = Math.max(WORLD_WIDTH, this.worldDepth, peakY) * 0.8 + 30;
-        const shadowCam = this.sun.shadow.camera;
-        shadowCam.left = -extent;
-        shadowCam.right = extent;
-        shadowCam.top = extent;
-        shadowCam.bottom = -extent;
-        shadowCam.near = 1;
-        shadowCam.far = 1200; // deckt auch flache Lichtwinkel mit langen Schatten ab
-        shadowCam.updateProjectionMatrix();
-
-        this.shadowExtent = extent;
-        this.updateShadowCatcher();
+        const peakY = this.currentPeakY();
 
         const dist = Math.max(WORLD_WIDTH, this.worldDepth, peakY * 1.6);
         this.perspectiveCamera.position.set(0, Math.max(dist * 0.65, peakY * 1.3), dist * 1.1);
@@ -614,6 +603,44 @@ export class TerrainViewer {
 
     baseThickness() {
         return (this.options.basePercent / 100) * 0.25 * WORLD_WIDTH;
+    }
+
+    /** Abstand des Modells zum Untergrund in Szenen-Einheiten. */
+    groundOffsetY() {
+        return ((this.options.groundOffset ?? 0) / 100) * WORLD_WIDTH;
+    }
+
+    /** Hebt das gesamte Modell (samt Tafeln und Kontaktschatten) über den Boden. */
+    applyGroundOffset() {
+        const y = this.groundOffsetY();
+        this.modelGroup.position.y = y;
+        this.labelGroup.position.y = y;
+        this.blobGroup.position.y = y;
+    }
+
+    setGroundOffset(percent) {
+        this.options.groundOffset = percent;
+        this.applyGroundOffset();
+        this.updateCloudAltitude();
+        this.updateShadowFit();
+        this.updateOrthoFrustum();
+    }
+
+    /** Schatten-Kamera und Schattenfänger auf die Modellausdehnung einpassen. */
+    updateShadowFit() {
+        if (!this.model) return;
+        const extent = Math.max(WORLD_WIDTH, this.worldDepth, this.currentPeakY()) * 0.8 + 30;
+        const shadowCam = this.sun.shadow.camera;
+        shadowCam.left = -extent;
+        shadowCam.right = extent;
+        shadowCam.top = extent;
+        shadowCam.bottom = -extent;
+        shadowCam.near = 1;
+        shadowCam.far = 1200; // deckt auch flache Lichtwinkel mit langen Schatten ab
+        shadowCam.updateProjectionMatrix();
+
+        this.shadowExtent = extent;
+        this.updateShadowCatcher();
     }
 
     /** Überträgt Höhen (inkl. Überhöhung und Sockel) auf die Geometrie. */
@@ -633,10 +660,10 @@ export class TerrainViewer {
         this.updateCloudAltitude();
     }
 
-    /** Höhe des höchsten Geländepunkts in Szenen-Einheiten (inkl. Sockel). */
+    /** Höhe des höchsten Geländepunkts in Szenen-Einheiten (inkl. Sockel und Bodenabstand). */
     currentPeakY() {
         return (this.maxHeight - this.minHeight) * this.worldScale * this.options.exaggeration
-            + this.baseThickness();
+            + this.baseThickness() + this.groundOffsetY();
     }
 
     /** Marker und Wege setzen; Punkte als { u, v, h } relativ zur Bbox. */
@@ -1280,14 +1307,20 @@ export class TerrainViewer {
 
     /** Kontaktschatten-Positionen (mit Flächennormalen) für den Web-Export. */
     getContactShadowPlacements() {
-        return this.contactShadowPlacements;
+        // Die gespeicherten Positionen sind gruppenlokal — der Bodenabstand
+        // steckt in der Gruppen-Transformation und wird hier eingerechnet
+        const offset = this.groundOffsetY();
+        return this.contactShadowPlacements.map((p) => ({
+            position: [p.position[0], p.position[1] + offset, p.position[2]],
+            normal: p.normal,
+        }));
     }
 
     /** Ortstafel-Daten (Name, Text, Weltposition) für den Web-Export. */
     getLabelPlacements() {
         if (!this.model || !this.overlays?.labels) return [];
         const scale = this.worldScale * this.options.exaggeration;
-        const base = this.baseThickness();
+        const base = this.baseThickness() + this.groundOffsetY();
         return this.overlays.labels.map((label) => ({
             name: `tafel-${label.id}`,
             text: label.text,
@@ -1336,14 +1369,14 @@ export class TerrainViewer {
         oldMap?.dispose();
     }
 
-    /** Positioniert die Lichtquelle aus Azimut (Rotation) und Abstand. */
+    /** Positioniert die Lichtquelle aus Azimut (Rotation) und Höhenwinkel. */
     updateSun() {
         const azimuth = THREE.MathUtils.degToRad(this.options.lightRotation);
-        const distance = this.options.lightDistance;
+        const elevation = THREE.MathUtils.degToRad(this.options.lightElevation);
         this.sun.position.set(
-            Math.cos(azimuth) * distance,
-            SUN_HEIGHT,
-            Math.sin(azimuth) * distance
+            Math.cos(azimuth) * Math.cos(elevation) * SUN_DISTANCE,
+            Math.sin(elevation) * SUN_DISTANCE,
+            Math.sin(azimuth) * Math.cos(elevation) * SUN_DISTANCE
         );
         this.updateShadowCatcher();
     }
@@ -1353,8 +1386,8 @@ export class TerrainViewer {
         this.updateSun();
     }
 
-    setLightDistance(distance) {
-        this.options.lightDistance = distance;
+    setLightElevation(degrees) {
+        this.options.lightElevation = degrees;
         this.updateSun();
     }
 
@@ -1368,7 +1401,7 @@ export class TerrainViewer {
         if (!this.shadowExtent) return;
         const extent = this.shadowExtent;
         const azimuth = THREE.MathUtils.degToRad(this.options.lightRotation);
-        const elevation = Math.atan2(SUN_HEIGHT, this.options.lightDistance);
+        const elevation = THREE.MathUtils.degToRad(this.options.lightElevation);
         const along = (extent / Math.sin(elevation)) * 0.9;
         const across = extent * 0.75;
         this.shadowMesh.rotation.y = -azimuth;

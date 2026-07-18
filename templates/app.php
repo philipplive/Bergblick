@@ -97,6 +97,10 @@ declare(strict_types=1);
                 <input type="range" id="opt-base" min="0" max="60" step="1" value="15">
             </label>
             <label class="field">
+                <span>Abstand zum Boden <output id="out-ground-offset">0 %</output></span>
+                <input type="range" id="opt-ground-offset" min="0" max="50" step="1" value="0">
+            </label>
+            <label class="field">
                 <span>Sockel-Stil</span>
                 <select id="opt-base-style">
                     <option value="color">Einfarbig</option>
@@ -136,8 +140,8 @@ declare(strict_types=1);
                 <input type="range" id="opt-light-rot" min="0" max="360" step="1" value="143">
             </label>
             <label class="field">
-                <span>Licht-Abstand <output id="out-light-dist">100</output></span>
-                <input type="range" id="opt-light-dist" min="40" max="400" step="5" value="100">
+                <span>Licht-Höhenwinkel <output id="out-light-elev">50°</output></span>
+                <input type="range" id="opt-light-elev" min="10" max="85" step="1" value="50">
             </label>
             <label class="field check">
                 <input type="checkbox" id="opt-ground" checked>
