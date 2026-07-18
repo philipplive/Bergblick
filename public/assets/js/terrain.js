@@ -950,6 +950,7 @@ export class TerrainViewer {
         rain.position.x = cloud.position.x;
         rain.position.z = cloud.position.z;
         const top = cloud.position.y - 2; // knapp unter der Wolkenbasis starten
+        const floor = this.groundOffsetY(); // Regen endet an der Modellunterkante
         const drops = rain.userData.drops;
         const active = Math.max(1, Math.round(drops.length * (intensity / 100)));
         rain.geometry.setDrawRange(0, active * 2);
@@ -958,7 +959,7 @@ export class TerrainViewer {
         for (let i = 0; i < active; i++) {
             const drop = drops[i];
             drop.y -= RAIN_FALL_SPEED * drop.speed * delta;
-            if (drop.y < 0 || drop.y > top) drop.y = top * (0.85 + Math.random() * 0.15);
+            if (drop.y < floor || drop.y > top) drop.y = top * (0.85 + Math.random() * 0.15);
             const j = i * 6;
             positions.array[j] = drop.x;
             positions.array[j + 1] = Math.min(top, drop.y + RAIN_DROP_LENGTH);

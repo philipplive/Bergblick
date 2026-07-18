@@ -1045,6 +1045,7 @@ function collectViewerConfig() {
         },
         cloudBaseY: viewer.cloudBaseY(),
         cloudDepth: viewer.worldDepth,
+        rainFloorY: viewer.groundOffsetY(),
         labels: viewer.getLabelPlacements(),
         contactShadows: viewer.getContactShadowPlacements(),
         contactShadowHardness: Number($('opt-shadow-hardness').value),

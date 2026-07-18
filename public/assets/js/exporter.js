@@ -492,6 +492,7 @@ let tiltMaxPolar = Math.PI;
 const cloudConfig = { count: 0, speed: 50, size: 100, opacity: 90, rain: 0, ...CONFIG.clouds };
 const CLOUD_BASE_Y = CONFIG.cloudBaseY;
 const CLOUD_DEPTH = CONFIG.cloudDepth;
+const RAIN_FLOOR_Y = CONFIG.rainFloorY || 0; // Regen endet an der Modellunterkante
 const CLOUD_LIMIT = 85;
 const CLOUD_FADE_DIST = 30;
 const RAIN_MAX_DROPS = 60;
@@ -647,7 +648,7 @@ function animateRain(cloud, fade, delta) {
     for (let i = 0; i < active; i++) {
         const drop = drops[i];
         drop.y -= RAIN_FALL_SPEED * drop.speed * delta;
-        if (drop.y < 0 || drop.y > top) drop.y = top * (0.85 + Math.random() * 0.15);
+        if (drop.y < RAIN_FLOOR_Y || drop.y > top) drop.y = top * (0.85 + Math.random() * 0.15);
         const j = i * 6;
         positions.array[j] = drop.x;
         positions.array[j + 1] = Math.min(top, drop.y + RAIN_DROP_LENGTH);
