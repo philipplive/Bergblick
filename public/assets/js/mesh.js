@@ -151,6 +151,52 @@ export function insideShape(ux, uy, shape) {
     return Math.abs(ux) <= 1 && Math.abs(uy) <= 1;
 }
 
+/**
+ * Gebackene Umgebungsverdeckung (Ambient Occlusion) aus dem Höhenraster:
+ * pro Rasterpunkt wird in 8 Richtungen der Horizontwinkel gesucht (HBAO-
+ * Prinzip) — Täler und Mulden erhalten weniger Himmelslicht als Grate und
+ * wirken dadurch plastischer. Die Überhöhung geht in die Winkel ein, damit
+ * die Verdeckung zur dargestellten (überhöhten) Geometrie passt.
+ *
+ * @returns Float32Array (gridW × gridH) Sichtbarkeit 0..1 (1 = unverdeckt)
+ */
+export function computeAmbientOcclusion(grid, exaggeration) {
+    const { heights, gridW, gridH, widthMeters, depthMeters } = grid;
+    const stepX = widthMeters / (gridW - 1);
+    const stepY = depthMeters / (gridH - 1);
+    const dirs = [
+        [1, 0], [-1, 0], [0, 1], [0, -1],
+        [1, 1], [1, -1], [-1, 1], [-1, -1],
+    ];
+    // Abtastdistanzen in Zellen: nah dicht, fern grob (geometrisch wachsend)
+    const steps = [];
+    const maxDist = Math.min(64, Math.floor(Math.max(gridW, gridH) / 4));
+    for (let d = 1; d <= maxDist; d = Math.ceil(d * 1.5)) steps.push(d);
+
+    const ao = new Float32Array(gridW * gridH);
+    for (let y = 0; y < gridH; y++) {
+        for (let x = 0; x < gridW; x++) {
+            const h0 = heights[y * gridW + x];
+            let visibility = 0;
+            for (const [dx, dy] of dirs) {
+                const stepLen = Math.hypot(dx * stepX, dy * stepY);
+                let maxTan = 0;
+                for (const d of steps) {
+                    const nx = x + dx * d;
+                    const ny = y + dy * d;
+                    if (nx < 0 || ny < 0 || nx >= gridW || ny >= gridH) break;
+                    const tan = ((heights[ny * gridW + nx] - h0) * exaggeration) / (d * stepLen);
+                    if (tan > maxTan) maxTan = tan;
+                }
+                // Sichtbarer Himmelsanteil dieser Richtung: 1 − sin(Horizontwinkel)
+                visibility += 1 - maxTan / Math.sqrt(1 + maxTan * maxTan);
+            }
+            ao[y * gridW + x] = visibility / dirs.length;
+        }
+    }
+    return ao;
+}
+
 /** Bilineare Höhenabtastung; u = 0..1 (West → Ost), v = 0..1 (Süd → Nord). */
 export function sampleHeight(grid, u, v) {
     const { heights, gridW, gridH } = grid;

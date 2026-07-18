@@ -238,14 +238,15 @@ export function buildWebViewerHTML() {
     karte.contentWindow.terrainViewer.getVisible('weg-1');  // true | false | null
     karte.contentWindow.terrainViewer.list();
 
-  Wolken steuern (alle Felder optional: count, speed, size, opacity, rain):
+  Wolken steuern (alle Felder optional: count, speed, size, opacity, rain, lightning):
     karte.contentWindow.postMessage({ type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60, rain: 40 }, '*');
     karte.contentWindow.postMessage({ type: 'clouds', count: 0 }, '*'); // Wolken aus
     karte.contentWindow.postMessage({ type: 'clouds', rain: 0 }, '*');  // Regen aus
+    karte.contentWindow.postMessage({ type: 'clouds', lightning: 60 }, '*'); // Gewitter an
 
   Bei gleicher Herkunft auch direkt:
     karte.contentWindow.terrainViewer.setClouds({ opacity: 50 });
-    karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity, rain }
+    karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity, rain, lightning }
 -->
 <html lang="de">
 <head>
@@ -367,6 +368,9 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true 
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // vereinigt überlappende Schatten korrekt
+// Filmisches Tone Mapping wie im Editor (Belichtung aus der Konfiguration)
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = CONFIG.exposure ?? 1;
 
 const scene = new THREE.Scene();
 if (TRANSPARENT) {
@@ -489,15 +493,17 @@ canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; }, {
 let tiltMaxPolar = Math.PI;
 
 // --- Wolken (weiche Sprite-Puffs + unsichtbare Schattenwerfer) ---
-const cloudConfig = { count: 0, speed: 50, size: 100, opacity: 90, rain: 0, ...CONFIG.clouds };
+const cloudConfig = { count: 0, speed: 50, size: 100, opacity: 90, rain: 0, lightning: 0, ...CONFIG.clouds };
 const CLOUD_BASE_Y = CONFIG.cloudBaseY;
 const CLOUD_DEPTH = CONFIG.cloudDepth;
-const RAIN_FLOOR_Y = CONFIG.rainFloorY || 0; // Regen endet an der Modellunterkante
+const RAIN_FLOOR_Y = CONFIG.rainFloorY || 0; // Regen/Blitze enden an der Modellunterkante
 const CLOUD_LIMIT = 85;
 const CLOUD_FADE_DIST = 30;
 const RAIN_MAX_DROPS = 60;
 const RAIN_FALL_SPEED = 42;
 const RAIN_DROP_LENGTH = 1.4;
+const LIGHTNING_MAX_SEGMENTS = 90;
+const LIGHTNING_DURATION = 0.3;
 
 const cloudGroup = new THREE.Group();
 scene.add(cloudGroup);
@@ -505,6 +511,27 @@ const rainGroup = new THREE.Group();
 scene.add(rainGroup);
 const cloudGeometry = new THREE.SphereGeometry(1, 14, 10);
 const cloudShadowMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+
+// Blitze: Zickzack-Liniensegmente + gepulstes Punktlicht (wie im Editor)
+const boltGeometry = new THREE.BufferGeometry();
+boltGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(LIGHTNING_MAX_SEGMENTS * 6), 3));
+boltGeometry.setDrawRange(0, 0);
+const boltMesh = new THREE.LineSegments(boltGeometry, new THREE.LineBasicMaterial({
+    color: 0xeaf2ff,
+    transparent: true,
+    opacity: 0,
+    toneMapped: false,
+    depthWrite: false,
+}));
+boltMesh.visible = false;
+boltMesh.frustumCulled = false;
+scene.add(boltMesh);
+const lightningLight = new THREE.PointLight(0xcfe0ff, 0, 0, 2);
+scene.add(lightningLight);
+let boltActive = false;
+let boltTime = 0;
+let lightningCooldown = 0;
+let flashCloud = null;
 
 function makePuffTexture() {
     const size = 128;
@@ -542,7 +569,8 @@ function makeCloud() {
         depthWrite: false,
         rotation: (Math.random() - 0.5) * 0.6,
     });
-    material.color.setScalar(0.94 + Math.random() * 0.06);
+    cloud.userData.baseShade = 0.94 + Math.random() * 0.06; // fürs Blitz-Aufleuchten
+    material.color.setScalar(cloud.userData.baseShade);
     cloud.userData.material = material;
     const puffs = 5 + Math.floor(Math.random() * 4);
     for (let i = 0; i < puffs; i++) {
@@ -602,6 +630,7 @@ function makeRain() {
 }
 
 function rebuildClouds() {
+    endLightning(); // Quellwolke eines aktiven Blitzes verschwindet gleich
     for (const cloud of cloudGroup.children) {
         if (cloud.userData.material) cloud.userData.material.dispose();
     }
@@ -661,6 +690,115 @@ function animateRain(cloud, fade, delta) {
     rain.material.opacity = 0.5 * fade;
 }
 
+// --- Blitze: Zickzack-Kanal mit Ästen, Flacker-Hüllkurve, Szenen-Flash ---
+function lightningEnvelope(t) {
+    const p1 = Math.exp(-t * 20);
+    const p2 = t > 0.1 ? Math.exp(-(t - 0.1) * 24) * 0.8 : 0;
+    return Math.min(1, p1 + p2);
+}
+
+function buildBolt(start, endY) {
+    const pos = boltGeometry.attributes.position.array;
+    let seg = 0;
+    const put = (a, b) => {
+        if (seg >= LIGHTNING_MAX_SEGMENTS) return;
+        const o = seg * 6;
+        pos[o] = a.x;
+        pos[o + 1] = a.y;
+        pos[o + 2] = a.z;
+        pos[o + 3] = b.x;
+        pos[o + 4] = b.y;
+        pos[o + 5] = b.z;
+        seg++;
+    };
+    const end = new THREE.Vector3(
+        start.x + (Math.random() - 0.5) * 12,
+        endY,
+        start.z + (Math.random() - 0.5) * 12
+    );
+    const steps = 14;
+    let prev = start.clone();
+    for (let i = 1; i <= steps; i++) {
+        const q = new THREE.Vector3().lerpVectors(start, end, i / steps);
+        if (i < steps) {
+            const jitter = 1 + (1 - i / steps) * 3;
+            q.x += (Math.random() - 0.5) * jitter;
+            q.z += (Math.random() - 0.5) * jitter;
+        }
+        put(prev, q);
+        if (i >= 3 && i <= steps - 3 && Math.random() < 0.35) {
+            let bp = q.clone();
+            const dir = new THREE.Vector3((Math.random() - 0.5) * 2, -1, (Math.random() - 0.5) * 2).normalize();
+            const branchSteps = 2 + Math.floor(Math.random() * 3);
+            for (let k = 0; k < branchSteps; k++) {
+                const nb = bp.clone().addScaledVector(dir, 1.5 + Math.random() * 2);
+                nb.x += (Math.random() - 0.5) * 1.5;
+                nb.z += (Math.random() - 0.5) * 1.5;
+                put(bp, nb);
+                bp = nb;
+            }
+        }
+        prev = q;
+    }
+    boltGeometry.setDrawRange(0, seg * 2);
+    boltGeometry.attributes.position.needsUpdate = true;
+}
+
+function strikeLightning() {
+    const clouds = cloudGroup.children;
+    const visible = clouds.filter((c) => c.userData.material.opacity > 0.15);
+    const pool = visible.length ? visible : clouds;
+    const cloud = pool[Math.floor(Math.random() * pool.length)];
+    const start = cloud.position.clone();
+    start.y -= 2;
+    buildBolt(start, RAIN_FLOOR_Y);
+    boltMesh.visible = true;
+    boltActive = true;
+    boltTime = 0;
+    flashCloud = cloud;
+    lightningLight.position.set(start.x, (start.y + RAIN_FLOOR_Y) / 2, start.z);
+}
+
+function endLightning() {
+    if (!boltActive) return;
+    boltActive = false;
+    boltMesh.visible = false;
+    boltMesh.material.opacity = 0;
+    lightningLight.intensity = 0;
+    if (flashCloud && flashCloud.userData.material) {
+        flashCloud.userData.material.color.setScalar(flashCloud.userData.baseShade || 1);
+    }
+    flashCloud = null;
+}
+
+function animateLightning(delta) {
+    const intensity = cloudConfig.lightning;
+    if (intensity <= 0 || !cloudGroup.children.length) {
+        endLightning();
+        return;
+    }
+    if (boltActive) {
+        boltTime += delta;
+        if (boltTime >= LIGHTNING_DURATION) {
+            endLightning();
+            return;
+        }
+        const envelope = lightningEnvelope(boltTime);
+        boltMesh.material.opacity = envelope;
+        lightningLight.intensity = envelope * 12000;
+        if (flashCloud && flashCloud.userData.material) {
+            flashCloud.userData.material.color.setScalar((flashCloud.userData.baseShade || 1) + envelope * 1.4);
+        }
+    } else {
+        lightningCooldown -= delta;
+        if (lightningCooldown <= 0) {
+            strikeLightning();
+            const mean = 12 - 11.2 * (intensity / 100);
+            lightningCooldown = mean * (0.4 + Math.random() * 1.2);
+        }
+    }
+}
+
 function animateClouds(delta) {
     const speed = (cloudConfig.speed / 100) * 12;
     for (const cloud of cloudGroup.children) {
@@ -718,7 +856,7 @@ const terrainViewer = {
     },
     setClouds(options = {}) {
         const previousCount = cloudConfig.count;
-        for (const key of ['count', 'speed', 'size', 'opacity', 'rain']) {
+        for (const key of ['count', 'speed', 'size', 'opacity', 'rain', 'lightning']) {
             if (typeof options[key] === 'number' && Number.isFinite(options[key])) {
                 cloudConfig[key] = Math.max(0, options[key]);
             }
@@ -765,7 +903,8 @@ function makeLabelCanvas(text) {
 }
 {
     const stickGeometry = new THREE.CylinderGeometry(0.12, 0.12, 1, 6);
-    const stickMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff }); // immer rein weiss
+    // ohne Tone Mapping: immer rein weiss
+    const stickMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
     for (const label of LABELS) {
         const group = new THREE.Group();
         group.name = label.name;
@@ -780,6 +919,7 @@ function makeLabelCanvas(text) {
             map: texture,
             transparent: true,
             depthWrite: false,
+            toneMapped: false, // Schild bleibt rein weiss/schwarz
         }));
         const plateHeight = 3.4;
         plate.scale.set(plateHeight * (labelCanvas.width / labelCanvas.height), plateHeight, 1);
@@ -974,7 +1114,9 @@ new ResizeObserver(resize).observe(canvas);
 resize();
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
-    animateClouds(clock.getDelta());
+    const delta = clock.getDelta();
+    animateClouds(delta);
+    animateLightning(delta);
     // Kamera nie unter die 0-Ebene (Modellboden), egal welches Neigungslimit
     // gilt: camera.y = target.y + r*cos(phi) >= 0, abhängig von Ziel und Zoom
     const r = camera.position.distanceTo(controls.target) || 1;

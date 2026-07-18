@@ -13,7 +13,8 @@ use Berglick\MapGenerator\Geo\BoundingBox;
  */
 final class TileService {
 	private const int TILE_SIZE = 256;
-	private const int MAX_TILES_PER_REQUEST = 150;
+	// 225 Kacheln ≈ 60 MB Stitch-Canvas — bleibt unter typischen PHP memory_limits
+	private const int MAX_TILES_PER_REQUEST = 225;
 	private const int CONCURRENT_DOWNLOADS = 8;
 	private const string USER_AGENT = 'berglick-map-generator/1.0 (private local 3d map generator)';
 

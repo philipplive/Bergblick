@@ -13,13 +13,13 @@ use Berglick\MapGenerator\Tile\TileService;
  * GET-Parameter:
  *   bbox  = west,south,east,north (Grad, WGS84)
  *   style = satellite | osm (Default satellite)
- *   size  = Kantenlänge der längeren Seite in Pixeln (256–2048, Default 1024)
+ *   size  = Kantenlänge der längeren Seite in Pixeln (256–4096, Default 1024)
  */
 final class TextureController extends ApiController {
 	protected function respond (TileService $tiles, array $query): void {
 		$bbox = BoundingBox::fromString ((string)($query['bbox'] ?? ''));
 		$style = ($query['style'] ?? 'satellite') === 'osm' ? 'osm' : 'satellite';
-		$size = max (256, min (2048, (int)($query['size'] ?? 1024)));
+		$size = max (256, min (4096, (int)($query['size'] ?? 1024)));
 
 		$result = $tiles->stitch ($style, $bbox, $size, rescale: true);
 

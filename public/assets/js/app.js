@@ -1,5 +1,5 @@
 import { TerrainViewer } from './terrain.js';
-import { buildGridMesh, buildShapeMesh, insideShape, sampleHeight } from './mesh.js';
+import { buildGridMesh, buildShapeMesh, computeAmbientOcclusion, insideShape, sampleHeight } from './mesh.js';
 import { buildBinarySTL, buildWebViewerHTML, buildZip, downloadBlob, heightmapToPNG } from './exporter.js';
 
 const $ = (id) => document.getElementById(id);
@@ -836,7 +836,7 @@ $('btn-generate').addEventListener('click', async () => {
             fetchImage(`api/elevation.php?bbox=${bboxParam}&size=${resolution}`),
             style === 'hypso'
                 ? Promise.resolve(null)
-                : fetchImage(`api/texture.php?bbox=${bboxParam}&style=${style}&size=1024`),
+                : fetchImage(`api/texture.php?bbox=${bboxParam}&style=${style}&size=${$('opt-texture-size').value}`),
         ]);
 
         setStatus('Erzeuge 3D-Modell …');
@@ -862,6 +862,13 @@ $('btn-generate').addEventListener('click', async () => {
             exaggeration: Number($('opt-exaggeration').value),
             basePercent: Number($('opt-base').value),
             groundOffset: Number($('opt-ground-offset').value),
+            // AO wird einmalig beim Generieren mit der aktuellen Überhöhung
+            // gebacken; der Überhöhungs-Regler ändert sie danach nicht mehr
+            aoGrid: {
+                data: computeAmbientOcclusion(rawGrid, Number($('opt-exaggeration').value)),
+                gridW: rawGrid.gridW,
+                gridH: rawGrid.gridH,
+            },
         });
         updateOverlays3D();
 
@@ -894,6 +901,16 @@ $('opt-base').addEventListener('input', (e) => {
 $('opt-ground-offset').addEventListener('input', (e) => {
     $('out-ground-offset').textContent = `${e.target.value} %`;
     viewer.setGroundOffset(Number(e.target.value));
+});
+
+$('opt-ao').addEventListener('input', (e) => {
+    $('out-ao').textContent = `${e.target.value} %`;
+    viewer.setAOStrength(Number(e.target.value));
+});
+
+$('opt-exposure').addEventListener('input', (e) => {
+    $('out-exposure').textContent = `${e.target.value} %`;
+    viewer.setExposure(Number(e.target.value));
 });
 
 $('opt-base-color').addEventListener('input', (e) => viewer.setBaseColor(e.target.value));
@@ -971,6 +988,11 @@ $('opt-cloud-rain').addEventListener('input', (e) => {
     viewer.setCloudRain(Number(e.target.value));
 });
 
+$('opt-lightning').addEventListener('input', (e) => {
+    $('out-lightning').textContent = `${e.target.value} %`;
+    viewer.setCloudLightning(Number(e.target.value));
+});
+
 // Export-Sichtbegrenzungen (wirken nur im exportierten Viewer)
 $('opt-tilt-limit').addEventListener('input', (e) => {
     $('out-tilt-limit').textContent = `${e.target.value}°`;
@@ -985,10 +1007,12 @@ $('opt-zoom-limit').addEventListener('input', (e) => {
 // ---------------------------------------------------------------------------
 
 const SETTING_IDS = [
-    'opt-style', 'opt-resolution', 'opt-exaggeration', 'opt-base', 'opt-ground-offset',
+    'opt-style', 'opt-resolution', 'opt-texture-size', 'opt-exaggeration', 'opt-ao',
+    'opt-base', 'opt-ground-offset',
     'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
-    'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev',
+    'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev', 'opt-exposure',
     'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-rain',
+    'opt-lightning',
     'opt-model-width',
     'opt-tilt-limit', 'opt-zoom-limit',
 ];
@@ -1036,12 +1060,14 @@ function collectViewerConfig() {
         sunPosition: viewer.sun.position.toArray(),
         shadowRadius: viewer.sun.shadow.radius,
         shadowIntensity: viewer.sun.shadow.intensity,
+        exposure: Number($('opt-exposure').value) / 100,
         clouds: {
             count: Number($('opt-clouds').value),
             speed: Number($('opt-cloud-speed').value),
             size: Number($('opt-cloud-size').value),
             opacity: Number($('opt-cloud-opacity').value),
             rain: Number($('opt-cloud-rain').value),
+            lightning: Number($('opt-lightning').value),
         },
         cloudBaseY: viewer.cloudBaseY(),
         cloudDepth: viewer.worldDepth,

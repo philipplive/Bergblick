@@ -66,6 +66,8 @@ const CLOUD_FADE_DIST = 30;             // Strecke für Ein-/Ausblenden am Rand
 const RAIN_MAX_DROPS = 60;              // Tropfen pro Wolke bei 100 % Regen
 const RAIN_FALL_SPEED = 42;             // Fallgeschwindigkeit (Einheiten pro Sekunde)
 const RAIN_DROP_LENGTH = 1.4;           // Länge eines Tropfen-Strichs
+const LIGHTNING_MAX_SEGMENTS = 90;      // Liniensegmente pro Blitz (Hauptkanal + Äste)
+const LIGHTNING_DURATION = 0.3;         // Sichtbarkeitsdauer eines Blitzes in Sekunden
 
 /** Weisses Textschild mit schwarzem Text und Rahmen für Ortstafeln. */
 export function makeLabelCanvas(text) {
@@ -234,6 +236,8 @@ export class TerrainViewer {
             exaggeration: 1.5,
             basePercent: 15,
             groundOffset: 0,    // Abstand des Modells zum Untergrund in % der Modellbreite
+            aoStrength: 60,     // Stärke der gebackenen Umgebungsverdeckung in Prozent
+            exposure: 100,      // Belichtung des Tone Mappings in Prozent
             baseColor: '#5c5148',
             baseStyle: 'color', // 'color' | 'soil' | 'rock' | 'strata'
             baseRelief: 100,    // Stärke des Sockel-Reliefs in Prozent (0 = flach)
@@ -248,8 +252,9 @@ export class TerrainViewer {
             cloudCount: 6,
             cloudSpeed: 50,   // Prozent
             cloudSize: 100,   // Prozent
-            cloudOpacity: 90, // Deckkraft in Prozent
-            cloudRain: 0,     // Regenstärke in Prozent (0 = kein Regen)
+            cloudOpacity: 90,  // Deckkraft in Prozent
+            cloudRain: 0,      // Regenstärke in Prozent (0 = kein Regen)
+            cloudLightning: 0, // Blitz-Intensität in Prozent (0 = keine Blitze)
         };
 
         this.scene = new THREE.Scene();
@@ -270,6 +275,9 @@ export class TerrainViewer {
         // Kanten kommen weiterhin über shadow.radius.
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
+        // Filmisches Tone Mapping: weicher Highlight-Verlauf statt hartem Clipping
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = this.options.exposure / 100;
         container.appendChild(this.renderer.domElement);
 
         this.attachControls(this.camera);
@@ -334,8 +342,8 @@ export class TerrainViewer {
         this.pinConeGeometry = new THREE.ConeGeometry(1.0, 3.4, 20);
         this.pinHeadGeometry = new THREE.SphereGeometry(1.15, 20, 14);
         this.stickGeometry = new THREE.CylinderGeometry(0.12, 0.12, 1, 6);
-        // unbeleuchtet: der Stab erscheint aus jedem Winkel rein weiss
-        this.stickMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        // unbeleuchtet und ohne Tone Mapping: aus jedem Winkel rein weiss
+        this.stickMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
 
         // Ortstafeln separat: Sprites lassen sich nicht ins GLB exportieren,
         // der Web-Export baut sie zur Laufzeit aus Konfigurationsdaten nach
@@ -372,6 +380,28 @@ export class TerrainViewer {
         this.rainGroup = new THREE.Group();
         this.scene.add(this.rainGroup);
 
+        // Blitze: ein wiederverwendeter Zickzack aus Liniensegmenten plus ein
+        // gepulstes Punktlicht als Szenen-Flash; Häufigkeit gemäss Blitz-Regler
+        this.boltGeometry = new THREE.BufferGeometry();
+        this.boltGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(LIGHTNING_MAX_SEGMENTS * 6), 3));
+        this.boltGeometry.setDrawRange(0, 0);
+        this.boltMesh = new THREE.LineSegments(this.boltGeometry, new THREE.LineBasicMaterial({
+            color: 0xeaf2ff,
+            transparent: true,
+            opacity: 0,
+            toneMapped: false, // Blitz bleibt grell, unabhängig vom Tone Mapping
+            depthWrite: false,
+        }));
+        this.boltMesh.visible = false;
+        this.boltMesh.frustumCulled = false; // Geometrie ändert sich pro Schlag
+        this.scene.add(this.boltMesh);
+        this.lightningLight = new THREE.PointLight(0xcfe0ff, 0, 0, 2);
+        this.scene.add(this.lightningLight);
+        this.boltActive = false;
+        this.boltTime = 0;
+        this.lightningCooldown = 0;
+        this.flashCloud = null;
+
         this.terrainMesh = null;
         this.skirtMesh = null;
 
@@ -380,7 +410,9 @@ export class TerrainViewer {
 
         this.clock = new THREE.Clock();
         this.renderer.setAnimationLoop(() => {
-            this.animateClouds(this.clock.getDelta());
+            const delta = this.clock.getDelta();
+            this.animateClouds(delta);
+            this.animateLightning(delta);
             this.clampOrbitAboveGround();
             this.controls.update();
             this.renderer.render(this.scene, this.camera);
@@ -509,7 +541,8 @@ export class TerrainViewer {
 
     /**
      * @param mesh    Geländenetz aus mesh.js (positionsXY, heights, uvs, indices, boundary)
-     * @param options { texture: ImageBitmap|null, exaggeration, basePercent }
+     * @param options { texture: ImageBitmap|null, exaggeration, basePercent,
+     *                  aoGrid: { data, gridW, gridH } | undefined }
      */
     build(mesh, options) {
         this.dispose();
@@ -540,6 +573,26 @@ export class TerrainViewer {
         geometry.setAttribute('uv', new THREE.BufferAttribute(Float32Array.from(uvs), 2));
         geometry.setIndex(new THREE.BufferAttribute(Uint32Array.from(indices), 1));
 
+        // Gebackene Umgebungsverdeckung: Sichtbarkeit pro Vertex, bilinear aus
+        // dem AO-Raster abgetastet (Rasterzeile 0 = Norden, wie sampleHeight)
+        this.vertexAO = null;
+        this.baseVertexColors = null;
+        if (this.options.aoGrid) {
+            const { data, gridW, gridH } = this.options.aoGrid;
+            const ao = new Float32Array(heights.length);
+            for (let i = 0; i < heights.length; i++) {
+                const fx = Math.min(Math.max(uvs[i * 2], 0), 1) * (gridW - 1);
+                const fy = (1 - Math.min(Math.max(uvs[i * 2 + 1], 0), 1)) * (gridH - 1);
+                const x0 = Math.min(Math.floor(fx), gridW - 2);
+                const y0 = Math.min(Math.floor(fy), gridH - 2);
+                const tx = fx - x0;
+                const ty = fy - y0;
+                ao[i] = (data[y0 * gridW + x0] * (1 - tx) + data[y0 * gridW + x0 + 1] * tx) * (1 - ty)
+                    + (data[(y0 + 1) * gridW + x0] * (1 - tx) + data[(y0 + 1) * gridW + x0 + 1] * tx) * ty;
+            }
+            this.vertexAO = ao;
+        }
+
         let material;
         if (this.options.texture) {
             // ImageBitmap-Uploads ignorieren texture.flipY (WebGL-Spezifikation),
@@ -553,7 +606,12 @@ export class TerrainViewer {
             const tex = new THREE.CanvasTexture(cnv);
             tex.colorSpace = THREE.SRGBColorSpace;
             tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-            material = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 });
+            material = new THREE.MeshStandardMaterial({
+                map: tex,
+                vertexColors: true, // trägt die AO-Abdunklung
+                roughness: 0.95,
+                metalness: 0,
+            });
         } else {
             const colors = new Float32Array(heights.length * 3);
             const range = Math.max(1, max - min);
@@ -563,15 +621,20 @@ export class TerrainViewer {
                 colors[i * 3 + 1] = g;
                 colors[i * 3 + 2] = b;
             }
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            this.baseVertexColors = colors;
             material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
         }
+
+        // Vertexfarben = (Hypso-Farbe ×) AO — applyAOColors() füllt die Werte.
+        // Sie wandern als COLOR_0 mit ins GLB und damit in den Web-Export.
+        geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(heights.length * 3), 3));
 
         this.terrainMesh = new THREE.Mesh(geometry, material);
         this.terrainMesh.name = 'gelaende'; // Name bleibt im GLB-Export erhalten
         this.terrainMesh.castShadow = true;
         this.terrainMesh.receiveShadow = true; // Selbstschatten: Gipfel werfen Schatten ins Tal
         this.modelGroup.add(this.terrainMesh);
+        this.applyAOColors();
 
         this.skirtMesh = new THREE.Mesh(
             new THREE.BufferGeometry(),
@@ -619,8 +682,15 @@ export class TerrainViewer {
     }
 
     setGroundOffset(percent) {
+        const previousY = this.groundOffsetY();
         this.options.groundOffset = percent;
+        const delta = this.groundOffsetY() - previousY;
         this.applyGroundOffset();
+        // Kamera und Orbit-Ziel im gleichen Mass mitheben: das Modell bleibt
+        // an derselben Stelle im Bild, nur Untergrund und Abstand ändern sich
+        this.controls.target.y += delta;
+        this.perspectiveCamera.position.y += delta;
+        this.orthoCamera.position.y += delta;
         this.updateCloudAltitude();
         this.updateShadowFit();
         this.updateOrthoFrustum();
@@ -751,7 +821,12 @@ export class TerrainViewer {
             const texture = new THREE.CanvasTexture(canvas);
             texture.colorSpace = THREE.SRGBColorSpace;
             this.overlayTextures.push(texture);
-            const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+            const material = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true,
+                depthWrite: false,
+                toneMapped: false, // Schild bleibt rein weiss/schwarz
+            });
             this.overlayMaterials.push(material);
             const plate = new THREE.Sprite(material);
             plate.scale.set(LABEL_PLATE_HEIGHT * (canvas.width / canvas.height), LABEL_PLATE_HEIGHT, 1);
@@ -804,7 +879,8 @@ export class TerrainViewer {
             depthWrite: false,
             rotation: (Math.random() - 0.5) * 0.6,
         });
-        material.color.setScalar(0.94 + Math.random() * 0.06);
+        cloud.userData.baseShade = 0.94 + Math.random() * 0.06; // fürs Blitz-Aufleuchten
+        material.color.setScalar(cloud.userData.baseShade);
         cloud.userData.material = material;
 
         const puffs = 5 + Math.floor(Math.random() * 4);
@@ -867,6 +943,7 @@ export class TerrainViewer {
 
     /** Baut die Wolkendecke (samt Regen) gemäss Anzahl/Grösse neu auf. */
     rebuildClouds() {
+        this.endLightning(); // Quellwolke eines aktiven Blitzes verschwindet gleich
         for (const cloud of this.cloudGroup.children) {
             cloud.userData.material?.dispose();
         }
@@ -994,6 +1071,127 @@ export class TerrainViewer {
 
     setCloudRain(percent) {
         this.options.cloudRain = percent; // greift im nächsten Animationsframe
+    }
+
+    setCloudLightning(percent) {
+        this.options.cloudLightning = percent; // greift im nächsten Animationsframe
+    }
+
+    /** Flacker-Hüllkurve eines Blitzes: zwei schnell abklingende Pulse. */
+    lightningEnvelope(t) {
+        const p1 = Math.exp(-t * 20);
+        const p2 = t > 0.1 ? Math.exp(-(t - 0.1) * 24) * 0.8 : 0;
+        return Math.min(1, p1 + p2);
+    }
+
+    /**
+     * Schreibt einen Zickzack-Blitz (Hauptkanal + zufällige Äste) von start
+     * bis auf die Höhe endY in den vorallozierten Segment-Buffer.
+     */
+    buildBolt(start, endY) {
+        const pos = this.boltGeometry.attributes.position.array;
+        let seg = 0;
+        const put = (a, b) => {
+            if (seg >= LIGHTNING_MAX_SEGMENTS) return;
+            const o = seg * 6;
+            pos[o] = a.x;
+            pos[o + 1] = a.y;
+            pos[o + 2] = a.z;
+            pos[o + 3] = b.x;
+            pos[o + 4] = b.y;
+            pos[o + 5] = b.z;
+            seg++;
+        };
+        const end = new THREE.Vector3(
+            start.x + (Math.random() - 0.5) * 12,
+            endY,
+            start.z + (Math.random() - 0.5) * 12
+        );
+        const steps = 14;
+        let prev = start.clone();
+        for (let i = 1; i <= steps; i++) {
+            const q = new THREE.Vector3().lerpVectors(start, end, i / steps);
+            if (i < steps) {
+                const jitter = 1 + (1 - i / steps) * 3; // oben stärker ausgelenkt
+                q.x += (Math.random() - 0.5) * jitter;
+                q.z += (Math.random() - 0.5) * jitter;
+            }
+            put(prev, q);
+            // gelegentliche Verästelung schräg nach unten
+            if (i >= 3 && i <= steps - 3 && Math.random() < 0.35) {
+                let bp = q.clone();
+                const dir = new THREE.Vector3((Math.random() - 0.5) * 2, -1, (Math.random() - 0.5) * 2).normalize();
+                const branchSteps = 2 + Math.floor(Math.random() * 3);
+                for (let k = 0; k < branchSteps; k++) {
+                    const nb = bp.clone().addScaledVector(dir, 1.5 + Math.random() * 2);
+                    nb.x += (Math.random() - 0.5) * 1.5;
+                    nb.z += (Math.random() - 0.5) * 1.5;
+                    put(bp, nb);
+                    bp = nb;
+                }
+            }
+            prev = q;
+        }
+        this.boltGeometry.setDrawRange(0, seg * 2);
+        this.boltGeometry.attributes.position.needsUpdate = true;
+    }
+
+    /** Löst einen Blitz an einer zufälligen, möglichst sichtbaren Wolke aus. */
+    strikeLightning() {
+        const clouds = this.cloudGroup.children;
+        const visible = clouds.filter((c) => c.userData.material.opacity > 0.15);
+        const pool = visible.length ? visible : clouds;
+        const cloud = pool[Math.floor(Math.random() * pool.length)];
+        const start = cloud.position.clone();
+        start.y -= 2;
+        this.buildBolt(start, this.groundOffsetY());
+        this.boltMesh.visible = true;
+        this.boltActive = true;
+        this.boltTime = 0;
+        this.flashCloud = cloud;
+        // Flash-Licht mittig am Kanal: erhellt Wolke und Gelände darunter
+        this.lightningLight.position.set(start.x, (start.y + this.groundOffsetY()) / 2, start.z);
+    }
+
+    /** Aktiven Blitz beenden und die Quellwolke zurücksetzen. */
+    endLightning() {
+        if (!this.boltActive) return;
+        this.boltActive = false;
+        this.boltMesh.visible = false;
+        this.boltMesh.material.opacity = 0;
+        this.lightningLight.intensity = 0;
+        this.flashCloud?.userData.material?.color.setScalar(this.flashCloud.userData.baseShade ?? 1);
+        this.flashCloud = null;
+    }
+
+    /** Blitz-Logik pro Frame: Zufalls-Cooldown, Flackern, Ausblenden. */
+    animateLightning(delta) {
+        const intensity = this.options.cloudLightning;
+        if (intensity <= 0 || !this.cloudGroup.children.length) {
+            this.endLightning();
+            return;
+        }
+        if (this.boltActive) {
+            this.boltTime += delta;
+            if (this.boltTime >= LIGHTNING_DURATION) {
+                this.endLightning();
+                return;
+            }
+            const envelope = this.lightningEnvelope(this.boltTime);
+            this.boltMesh.material.opacity = envelope;
+            this.lightningLight.intensity = envelope * 12000;
+            this.flashCloud?.userData.material?.color.setScalar(
+                (this.flashCloud.userData.baseShade ?? 1) + envelope * 1.4
+            );
+        } else {
+            this.lightningCooldown -= delta;
+            if (this.lightningCooldown <= 0) {
+                this.strikeLightning();
+                // mittlere Pause: ~12 s bei 1 % bis ~0.8 s bei 100 %
+                const mean = 12 - 11.2 * (intensity / 100);
+                this.lightningCooldown = mean * (0.4 + Math.random() * 1.2);
+            }
+        }
     }
 
     /**
@@ -1220,6 +1418,36 @@ export class TerrainViewer {
         geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
         this.skirtMesh.geometry.dispose();
         this.skirtMesh.geometry = geo;
+    }
+
+    /**
+     * Schreibt die Vertexfarben des Geländes: gebackene AO-Abdunklung gemäss
+     * aoStrength, im Hypso-Modus multipliziert mit der Höhenfarbe.
+     */
+    applyAOColors() {
+        const attr = this.terrainMesh?.geometry.getAttribute('color');
+        if (!attr) return;
+        const strength = (this.options.aoStrength ?? 0) / 100;
+        const base = this.baseVertexColors;
+        for (let i = 0; i < attr.count; i++) {
+            const shade = this.vertexAO ? 1 - strength * (1 - this.vertexAO[i]) : 1;
+            if (base) {
+                attr.setXYZ(i, base[i * 3] * shade, base[i * 3 + 1] * shade, base[i * 3 + 2] * shade);
+            } else {
+                attr.setXYZ(i, shade, shade, shade);
+            }
+        }
+        attr.needsUpdate = true;
+    }
+
+    setAOStrength(value) {
+        this.options.aoStrength = value;
+        this.applyAOColors();
+    }
+
+    setExposure(percent) {
+        this.options.exposure = percent;
+        this.renderer.toneMappingExposure = percent / 100;
     }
 
     setExaggeration(value) {

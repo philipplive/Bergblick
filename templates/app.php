@@ -89,8 +89,20 @@ declare(strict_types=1);
                 </select>
             </label>
             <label class="field">
+                <span>Textur-Auflösung</span>
+                <select id="opt-texture-size">
+                    <option value="1024">1024 px (schnell)</option>
+                    <option value="2048" selected>2048 px</option>
+                    <option value="4096">4096 px (langsam)</option>
+                </select>
+            </label>
+            <label class="field">
                 <span>Überhöhung <output id="out-exaggeration">1.5×</output></span>
                 <input type="range" id="opt-exaggeration" min="0.5" max="5" step="0.1" value="1.5">
+            </label>
+            <label class="field">
+                <span>Schattierung (AO) <output id="out-ao">60 %</output></span>
+                <input type="range" id="opt-ao" min="0" max="100" step="1" value="60">
             </label>
             <label class="field">
                 <span>Sockelhöhe <output id="out-base">15 %</output></span>
@@ -143,6 +155,10 @@ declare(strict_types=1);
                 <span>Licht-Höhenwinkel <output id="out-light-elev">50°</output></span>
                 <input type="range" id="opt-light-elev" min="10" max="85" step="1" value="50">
             </label>
+            <label class="field">
+                <span>Belichtung <output id="out-exposure">100 %</output></span>
+                <input type="range" id="opt-exposure" min="50" max="200" step="5" value="100">
+            </label>
             <label class="field check">
                 <input type="checkbox" id="opt-ground" checked>
                 <span>Untergrund anzeigen</span>
@@ -177,6 +193,10 @@ declare(strict_types=1);
             <label class="field">
                 <span>Regen <output id="out-cloud-rain">0 %</output></span>
                 <input type="range" id="opt-cloud-rain" min="0" max="100" step="1" value="0">
+            </label>
+            <label class="field">
+                <span>Blitze <output id="out-lightning">0 %</output></span>
+                <input type="range" id="opt-lightning" min="0" max="100" step="1" value="0">
             </label>
             <label class="field">
                 <span>Export: Neigung max. ± <output id="out-tilt-limit">90°</output></span>
