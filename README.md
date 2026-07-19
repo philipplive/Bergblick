@@ -4,6 +4,26 @@ Web-App zum Erzeugen von 3D-Geländemodellen aus einem frei wählbaren Kartenaus
 
 ![3D-Ansicht des Berglick Map-Generators](docs/images/screenshot-3d-ansicht.png)
 
+### Wettersimulation & Atmosphäre
+
+![Geländemodell mit Wettersimulation: Wolken, Regen und Nebelschwaden](docs/images/screenshot-3d-ansicht-2.png)
+
+Das 3D-Modell lässt sich mit einer stimmungsvollen Wetter- und Atmosphärensimulation
+beleben – von leichter Bewölkung bis zum Gewitter. Alle Effekte werden in Echtzeit
+gerendert und bleiben beim Web-Export erhalten:
+
+- **Wolken:** Anzahl, Zuggeschwindigkeit, Grösse und Deckkraft sind frei einstellbar.
+  Die Wolken ziehen über das Gelände und werfen wandernde Schatten auf die Oberfläche.
+- **Regen:** Unter den Wolken fallen sichtbare Regenschauer; die Regenstärke ist
+  stufenlos regelbar.
+- **Blitze:** Zufällige Blitzeinschläge lassen die Szene kurz aufleuchten und erzeugen
+  eine echte Gewitterstimmung.
+- **Nebelschwaden:** Bodennaher Nebel legt sich in Grösse und Dichte einstellbar über
+  die Täler und Hänge und bleibt dabei innerhalb der Modellgrenzen.
+- **Licht & Schatten:** Sonnenstand (Rotation und Höhenwinkel), Belichtung sowie Härte
+  und Stärke der Schatten sind konfigurierbar – für weiche Morgen- oder harte
+  Mittagsstimmungen.
+
 ## Starten
 
 ```bash
