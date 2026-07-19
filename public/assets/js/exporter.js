@@ -406,7 +406,7 @@ scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x54492e, 1.1));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(CONFIG.sunPosition[0], CONFIG.sunPosition[1], CONFIG.sunPosition[2]);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(4096, 4096);
 sun.shadow.bias = -0.0002;
 sun.shadow.normalBias = 0.5;
 sun.shadow.radius = CONFIG.shadowRadius;

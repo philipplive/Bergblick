@@ -19,32 +19,48 @@ export const PCF_POISSON_BRANCH = `#if defined( SHADOWMAP_TYPE_PCF )
             vec2 texelSize = vec2( 1.0 ) / shadowMapSize;
             vec2 spread = texelSize * shadowRadius;
 
-            vec2 poissonDisk[ 16 ];
-            poissonDisk[ 0 ] = vec2( -0.94201624, -0.39906216 );
-            poissonDisk[ 1 ] = vec2( 0.94558609, -0.76890725 );
-            poissonDisk[ 2 ] = vec2( -0.09418410, -0.92938870 );
-            poissonDisk[ 3 ] = vec2( 0.34495938, 0.29387760 );
-            poissonDisk[ 4 ] = vec2( -0.91588581, 0.45771432 );
-            poissonDisk[ 5 ] = vec2( -0.81544232, -0.87912464 );
-            poissonDisk[ 6 ] = vec2( -0.38277543, 0.27676845 );
-            poissonDisk[ 7 ] = vec2( 0.97484398, 0.75648379 );
-            poissonDisk[ 8 ] = vec2( 0.44323325, -0.97511554 );
-            poissonDisk[ 9 ] = vec2( 0.53742981, -0.47373420 );
-            poissonDisk[ 10 ] = vec2( -0.26496911, -0.41893023 );
-            poissonDisk[ 11 ] = vec2( 0.79197514, 0.19090188 );
-            poissonDisk[ 12 ] = vec2( -0.24188840, 0.99706507 );
-            poissonDisk[ 13 ] = vec2( -0.81409955, 0.91437590 );
-            poissonDisk[ 14 ] = vec2( 0.19984126, 0.78641367 );
-            poissonDisk[ 15 ] = vec2( 0.14383161, -0.14100790 );
+            vec2 poissonDisk[ 32 ];
+            poissonDisk[ 0 ] = vec2( 0.42728091, 0.26415186 );
+            poissonDisk[ 1 ] = vec2( -0.92311000, -0.37826944 );
+            poissonDisk[ 2 ] = vec2( 0.19956967, -0.96973308 );
+            poissonDisk[ 3 ] = vec2( -0.65105173, 0.74941396 );
+            poissonDisk[ 4 ] = vec2( 0.88890125, -0.45608048 );
+            poissonDisk[ 5 ] = vec2( -0.16883807, -0.23656267 );
+            poissonDisk[ 6 ] = vec2( 0.12699719, 0.98895632 );
+            poissonDisk[ 7 ] = vec2( -0.47036682, -0.86789015 );
+            poissonDisk[ 8 ] = vec2( -0.16244858, 0.40259296 );
+            poissonDisk[ 9 ] = vec2( -0.90667031, 0.21125381 );
+            poissonDisk[ 10 ] = vec2( 0.96942256, 0.14270868 );
+            poissonDisk[ 11 ] = vec2( 0.36871545, -0.29837092 );
+            poissonDisk[ 12 ] = vec2( 0.67435978, 0.73299741 );
+            poissonDisk[ 13 ] = vec2( -0.48648958, 0.08194988 );
+            poissonDisk[ 14 ] = vec2( 0.59400312, -0.79385041 );
+            poissonDisk[ 15 ] = vec2( -0.09431953, -0.66590281 );
+            poissonDisk[ 16 ] = vec2( -0.27829308, 0.93012527 );
+            poissonDisk[ 17 ] = vec2( -0.51944696, -0.45554064 );
+            poissonDisk[ 18 ] = vec2( 0.08066623, 0.07660021 );
+            poissonDisk[ 19 ] = vec2( 0.19652416, 0.59775397 );
+            poissonDisk[ 20 ] = vec2( 0.70246638, -0.11980137 );
+            poissonDisk[ 21 ] = vec2( 0.25521838, -0.62673277 );
+            poissonDisk[ 22 ] = vec2( -0.60182758, 0.41173964 );
+            poissonDisk[ 23 ] = vec2( 0.73515790, 0.39033349 );
+            poissonDisk[ 24 ] = vec2( -0.77826431, -0.08469927 );
+            poissonDisk[ 25 ] = vec2( -0.71834785, -0.68825940 );
+            poissonDisk[ 26 ] = vec2( -0.13646017, -0.97381242 );
+            poissonDisk[ 27 ] = vec2( -0.35043597, 0.64063427 );
+            poissonDisk[ 28 ] = vec2( 0.41710541, 0.90770521 );
+            poissonDisk[ 29 ] = vec2( -0.04372319, 0.76136643 );
+            poissonDisk[ 30 ] = vec2( 0.59183829, -0.49060638 );
+            poissonDisk[ 31 ] = vec2( 0.08804962, -0.36545202 );
 
             float angle = fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) * 6.2831853;
             mat2 rotation = mat2( cos( angle ), sin( angle ), -sin( angle ), cos( angle ) );
 
             shadow = 0.0;
-            for ( int i = 0; i < 16; i ++ ) {
+            for ( int i = 0; i < 32; i ++ ) {
                 shadow += texture2DCompare( shadowMap, shadowCoord.xy + rotation * poissonDisk[ i ] * spread, shadowCoord.z );
             }
-            shadow *= 0.0625;
+            shadow *= 0.03125;
 
         `;
 
@@ -327,7 +343,7 @@ export class TerrainViewer {
         this.scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x54492e, 1.1));
         const sun = new THREE.DirectionalLight(0xffffff, 1.6);
         sun.castShadow = true;
-        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.mapSize.set(4096, 4096);
         sun.shadow.bias = -0.0002;
         sun.shadow.normalBias = 0.5; // gegen Schatten-Akne auf den Hängen (PCF)
         this.sun = sun;
@@ -1867,7 +1883,9 @@ export class TerrainViewer {
     /** 100 = harte Kante, 0 = maximal weich. */
     setShadowHardness(value) {
         this.options.shadowHardness = value;
-        this.sun.shadow.radius = 0.5 + (1 - value / 100) * 25;
+        // Radius ist in Shadow-Map-Texeln: bei 4096er-Map doppelt so gross
+        // wie früher bei 2048, damit die Weichheit in Weltmassen gleich bleibt
+        this.sun.shadow.radius = 1 + (1 - value / 100) * 50;
         this.updateContactShadowStyle();
     }
 
