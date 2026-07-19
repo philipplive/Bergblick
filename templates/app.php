@@ -71,7 +71,7 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
-            <h2>3. Einstellungen</h2>
+            <h2>3.1 Gelände &amp; Textur</h2>
             <label class="field">
                 <span>Oberfläche</span>
                 <select id="opt-style">
@@ -104,6 +104,10 @@ declare(strict_types=1);
                 <span>Schattierung (AO) <output id="out-ao">60 %</output></span>
                 <input type="range" id="opt-ao" min="0" max="100" step="1" value="60">
             </label>
+        </section>
+
+        <section class="panel">
+            <h2>3.2 Sockel</h2>
             <label class="field">
                 <span>Sockelhöhe <output id="out-base">15 %</output></span>
                 <input type="range" id="opt-base" min="0" max="60" step="1" value="15">
@@ -127,9 +131,15 @@ declare(strict_types=1);
             </label>
             <div class="color-row">
                 <label class="color-field">
-                    <span>Sockel</span>
+                    <span>Sockelfarbe</span>
                     <input type="color" id="opt-base-color" value="#5c5148">
                 </label>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>3.3 Grafik &amp; Licht</h2>
+            <div class="color-row">
                 <label class="color-field">
                     <span>Untergrund</span>
                     <input type="color" id="opt-ground-color" value="#262b36">
@@ -174,6 +184,10 @@ declare(strict_types=1);
                     <button type="button" id="btn-bg-clear" class="btn" title="Hintergrundbild entfernen">✕</button>
                 </span>
             </label>
+        </section>
+
+        <section class="panel">
+            <h2>3.4 Wolken, Regen, Blitze &amp; Nebel</h2>
             <label class="field">
                 <span>Wolken <output id="out-clouds">6</output></span>
                 <input type="range" id="opt-clouds" min="0" max="20" step="1" value="6">
@@ -203,13 +217,22 @@ declare(strict_types=1);
                 <input type="range" id="opt-fog" min="0" max="100" step="1" value="0">
             </label>
             <label class="field">
-                <span>Export: Neigung max. ± <output id="out-tilt-limit">90°</output></span>
+                <span>Nebel-Grösse <output id="out-fog-size">100 %</output></span>
+                <input type="range" id="opt-fog-size" min="50" max="200" step="5" value="100">
+            </label>
+        </section>
+
+        <section class="panel">
+            <h2>3.5 Export-Einstellungen</h2>
+            <label class="field">
+                <span>Neigung max. ± <output id="out-tilt-limit">90°</output></span>
                 <input type="range" id="opt-tilt-limit" min="0" max="90" step="5" value="90">
             </label>
             <label class="field">
-                <span>Export: Zoom hinein max. <output id="out-zoom-limit">50 %</output></span>
+                <span>Zoom hinein max. <output id="out-zoom-limit">50 %</output></span>
                 <input type="range" id="opt-zoom-limit" min="0" max="80" step="5" value="50">
             </label>
+            <p class="muted">Begrenzt die Kamera im exportierten Web-Viewer.</p>
         </section>
 
         <section class="panel">
@@ -230,15 +253,13 @@ declare(strict_types=1);
             </label>
             <div class="btn-row">
                 <button id="btn-export-stl" class="btn">STL (3D-Druck)</button>
-                <button id="btn-export-png" class="btn">Screenshot</button>
-                <button id="btn-export-heightmap" class="btn">Heightmap</button>
                 <button id="btn-export-web" class="btn">Web (HTML)</button>
-                <button id="btn-export-test" class="btn">Web testen</button>
+                <button id="btn-export-test" class="btn">Web (HTML) Test</button>
                 <button id="btn-export-project" class="btn">Projekt (JSON)</button>
             </div>
             <p class="muted">Web-Export: ZIP mit Viewer-HTML, 3D-Modell und Texturen als separate
                 Dateien — entpacken, alles zusammen hochladen und per
-                <code>&lt;iframe&gt;</code> einbinden. „Web testen“ legt denselben Export
+                <code>&lt;iframe&gt;</code> einbinden. „Web (HTML) Test“ legt denselben Export
                 direkt unter <code>/test/</code> ab und öffnet ihn im neuen Tab.</p>
         </section>
 

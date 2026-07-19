@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { makeSoilTexture, makeRockTexture, makeStrataTexture } from './textures.js';
+import { insideShape, sampleHeight } from './mesh.js';
 
 const WORLD_WIDTH = 100;   // Modellbreite in Szenen-Einheiten
 const SUN_DISTANCE = 160;  // fester Abstand der Lichtquelle vom Mittelpunkt
@@ -69,7 +70,7 @@ const RAIN_DROP_LENGTH = 1.4;           // Länge eines Tropfen-Strichs
 const LIGHTNING_MAX_SEGMENTS = 90;      // Liniensegmente pro Blitz (Hauptkanal + Äste)
 const LIGHTNING_DURATION = 0.3;         // Sichtbarkeitsdauer eines Blitzes in Sekunden
 const FOG_MAX_WISPS = 16;               // Nebelschwaden bei 100 % Dichte
-const FOG_LIMIT = WORLD_WIDTH * 0.62;   // Driftstrecke der Schwaden (±x)
+const FOG_EDGE_MARGIN = 14;             // Randabstand einer Schwade (bei 100 % Grösse)
 const FOG_FADE_DIST = 20;               // Strecke für Ein-/Ausblenden am Rand
 const FOG_DRIFT_SPEED = 1.6;            // maximale Driftgeschwindigkeit (Einheiten/s)
 
@@ -104,6 +105,10 @@ export function makeLabelCanvas(text) {
 const LABEL_STICK_HEIGHT = 8;   // Stablänge der Ortstafeln (Szenen-Einheiten)
 const LABEL_PLATE_HEIGHT = 3.4; // Höhe des Textschilds
 const CONTACT_SHADOW_SIZE = 3.6; // Durchmesser der Kontaktschatten-Kreise
+const PATH_TUBE_RADIUS = 0.35;  // Dicke der Weg-Röhren
+const PATH_DASH_LENGTH = 1.7;   // Strichlänge gestrichelter Wege
+const PATH_DASH_GAP = 1.1;      // Lücke gestrichelter Wege
+const PATH_DOT_SPACING = 1.6;   // Punktabstand gepunkteter Wege
 
 /**
  * Ausfadender Kreis für Kontaktschatten unter Markern/Tafeln. Weiss gezeichnet,
@@ -291,6 +296,7 @@ export class TerrainViewer {
             cloudRain: 0,      // Regenstärke in Prozent (0 = kein Regen)
             cloudLightning: 0, // Blitz-Intensität in Prozent (0 = keine Blitze)
             fogDensity: 0,     // Dichte der Nebelschwaden in Prozent (0 = kein Nebel)
+            fogSize: 100,      // Grösse der Nebelschwaden in Prozent
         };
 
         this.scene = new THREE.Scene();
@@ -370,13 +376,14 @@ export class TerrainViewer {
         this.overlayGroup = new THREE.Group();
         this.modelGroup.add(this.overlayGroup);
 
-        // { markers: [{id, color, u, v, h}], paths: [{id, color, runs}], labels: [{id, text, u, v, h}] }
+        // { markers: [{id, color, u, v, h}], paths: [{id, color, lineType, runs}], labels: [{id, text, u, v, h}] }
         this.overlays = null;
         this.overlayGeometries = [];
         this.overlayMaterials = [];
         this.overlayTextures = [];
         this.pinConeGeometry = new THREE.ConeGeometry(1.0, 3.4, 20);
         this.pinHeadGeometry = new THREE.SphereGeometry(1.15, 20, 14);
+        this.pathDotGeometry = new THREE.SphereGeometry(PATH_TUBE_RADIUS * 1.3, 12, 10);
         this.stickGeometry = new THREE.CylinderGeometry(0.12, 0.12, 1, 6);
         // unbeleuchtet und ohne Tone Mapping: aus jedem Winkel rein weiss
         this.stickMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
@@ -887,6 +894,13 @@ export class TerrainViewer {
             this.overlayMaterials.push(material);
             const group = new THREE.Group();
             group.name = `weg-${path.id}`;
+            const addTube = (curve, segments) => {
+                const geometry = new THREE.TubeGeometry(curve, segments, PATH_TUBE_RADIUS, 8, false);
+                this.overlayGeometries.push(geometry);
+                const tube = new THREE.Mesh(geometry, material);
+                tube.castShadow = true;
+                group.add(tube);
+            };
             for (const run of path.runs) {
                 if (run.length < 2) continue;
                 const points = run.map((p) => {
@@ -895,11 +909,34 @@ export class TerrainViewer {
                     return v;
                 });
                 const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-                const geometry = new THREE.TubeGeometry(curve, Math.max(16, points.length * 2), 0.35, 8, false);
-                this.overlayGeometries.push(geometry);
-                const tube = new THREE.Mesh(geometry, material);
-                tube.castShadow = true;
-                group.add(tube);
+                if (path.lineType === 'dotted') {
+                    // Kugeln in gleichmässigen Abständen entlang der Bogenlänge
+                    const count = Math.max(1, Math.round(curve.getLength() / PATH_DOT_SPACING));
+                    for (let i = 0; i <= count; i++) {
+                        const dot = new THREE.Mesh(this.pathDotGeometry, material);
+                        dot.position.copy(curve.getPointAt(i / count));
+                        dot.castShadow = true;
+                        group.add(dot);
+                    }
+                } else if (path.lineType === 'dashed') {
+                    // Teilung so runden, dass der Weg mit einem Strich beginnt und endet
+                    const length = curve.getLength();
+                    const n = Math.max(1, Math.round(
+                        (length + PATH_DASH_GAP) / (PATH_DASH_LENGTH + PATH_DASH_GAP)));
+                    const dash = (length - (n - 1) * PATH_DASH_GAP) / n;
+                    for (let i = 0; i < n; i++) {
+                        const t0 = (i * (dash + PATH_DASH_GAP)) / length;
+                        const t1 = Math.min(1, t0 + dash / length);
+                        const steps = Math.max(2, Math.ceil(dash * 2));
+                        const seg = [];
+                        for (let k = 0; k <= steps; k++) {
+                            seg.push(curve.getPointAt(t0 + ((t1 - t0) * k) / steps));
+                        }
+                        addTube(new THREE.CatmullRomCurve3(seg, false, 'centripetal'), steps);
+                    }
+                } else {
+                    addTube(curve, Math.max(16, points.length * 2));
+                }
             }
             this.overlayGroup.add(group);
         }
@@ -918,6 +955,91 @@ export class TerrainViewer {
     /** Höhe des Bandes, in dem die Nebelschwaden treiben (untere Hanglagen). */
     fogBandHeight() {
         return Math.max(4, (this.currentPeakY() - this.fogBaseY()) * 0.35);
+    }
+
+    fogSizeFactor() {
+        return Math.max(0.1, this.options.fogSize / 100);
+    }
+
+    /**
+     * Bewegungsraum der Schwaden: Modellgrundfläche minus Randabstand, damit
+     * auch grosse Schwaden vollständig über dem Gelände bleiben und nicht
+     * über die Kante hinausragen.
+     */
+    fogXLimit() {
+        return Math.max(6, WORLD_WIDTH / 2 - FOG_EDGE_MARGIN * this.fogSizeFactor());
+    }
+
+    fogZHalf() {
+        return Math.max(2, this.worldDepth / 2 - FOG_EDGE_MARGIN * this.fogSizeFactor());
+    }
+
+    /** Liegt (x, z) innerhalb der um den Randabstand geschrumpften Grundform? */
+    fogInsideShape(x, z) {
+        const halfW = WORLD_WIDTH / 2;
+        const halfD = this.worldDepth / 2;
+        const margin = FOG_EDGE_MARGIN * this.fogSizeFactor();
+        const kx = Math.max(0.1, 1 - margin / halfW);
+        const kz = Math.max(0.1, 1 - margin / halfD);
+        return insideShape((x / halfW) / kx, (-z / halfD) / kz, this.options.shape ?? 'rect');
+    }
+
+    /** Geländeoberfläche (Szenen-Y) an der Position (x, z); Basis für die Schwadenhöhe. */
+    fogGroundY(x, z) {
+        const grid = this.options.heightGrid;
+        if (!grid) return this.fogBaseY();
+        const u = x / WORLD_WIDTH + 0.5;
+        const v = 0.5 - z / this.worldDepth;
+        const h = sampleHeight(grid, u, v);
+        return (h - this.minHeight) * this.worldScale * this.options.exaggeration
+            + this.baseThickness() + this.groundOffsetY();
+    }
+
+    /**
+     * Kompaktes Höhenfeld der Geländeoberfläche (Szenen-Y) über der ganzen
+     * Grundfläche — der Web-Export nutzt es, um die Schwaden dem Gelände
+     * folgen zu lassen (das GLB selbst hat kein Höhenraster).
+     */
+    getFogHeightField() {
+        if (!this.options.heightGrid) return null;
+        const gridW = 48;
+        const gridH = 48;
+        const data = new Array(gridW * gridH);
+        for (let r = 0; r < gridH; r++) {
+            for (let c = 0; c < gridW; c++) {
+                const x = (c / (gridW - 1) - 0.5) * WORLD_WIDTH;
+                const z = (r / (gridH - 1) - 0.5) * this.worldDepth;
+                data[r * gridW + c] = Math.round(this.fogGroundY(x, z) * 10) / 10;
+            }
+        }
+        return { gridW, gridH, data };
+    }
+
+    /**
+     * Setzt eine Schwade an eine gültige Position innerhalb der Grundform.
+     * atEntry: an die westliche Eintrittskante (Drift geht nach Osten) —
+     * dort blendet sie über die Driftstrecke ein statt aufzupoppen.
+     */
+    fogRespawn(wisp, atEntry) {
+        const xLimit = this.fogXLimit();
+        const zHalf = this.fogZHalf();
+        const data = wisp.userData;
+        data.heightFraction = Math.random();
+        for (let attempt = 0; attempt < 30; attempt++) {
+            const z = (Math.random() * 2 - 1) * zHalf;
+            let x = atEntry ? -xLimit : (Math.random() * 2 - 1) * xLimit;
+            // Bei Kreis/Sechseck liegt die Eintrittskante je nach z weiter innen
+            while (atEntry && x < xLimit && !this.fogInsideShape(x, z)) x += 3;
+            if (this.fogInsideShape(x, z)) {
+                wisp.position.x = x;
+                wisp.position.z = z;
+                // Einblenden ab Eintrittskante; bei freier Platzierung sofort voll da
+                data.entryX = atEntry ? x : x - FOG_FADE_DIST;
+                return;
+            }
+        }
+        wisp.position.set(0, this.fogBaseY(), 0); // Rückfall: Mitte ist immer gültig
+        data.entryX = -FOG_FADE_DIST;
     }
 
     /**
@@ -1072,22 +1194,20 @@ export class TerrainViewer {
         for (let i = 0; i < FOG_MAX_WISPS; i++) {
             const wisp = this.makeFogWisp();
             wisp.userData.speedFactor = 0.5 + Math.random() * 0.7;
-            wisp.userData.heightFraction = Math.random();
             wisp.userData.phase = Math.random() * Math.PI * 2;
             wisp.userData.fade = 0;
-            wisp.position.set(
-                (Math.random() * 2 - 1) * FOG_LIMIT,
-                this.fogBaseY(),
-                (Math.random() - 0.5) * this.worldDepth * 0.85
-            );
+            wisp.scale.setScalar(this.fogSizeFactor());
+            wisp.position.y = this.fogBaseY();
+            this.fogRespawn(wisp, false);
             this.fogGroup.add(wisp);
         }
     }
 
     /**
-     * Schwaden driften langsam von West nach Ost und wabern dabei leicht in
-     * Höhe und Deckkraft. Höhe wird pro Frame berechnet und folgt damit auch
-     * Überhöhungs-, Sockel- und Bodenabstands-Änderungen automatisch.
+     * Schwaden driften langsam von West nach Ost, schmiegen sich an die
+     * Geländeoberfläche und wabern dabei leicht in Höhe und Deckkraft.
+     * Höhe wird pro Frame berechnet und folgt damit auch Überhöhungs-,
+     * Sockel- und Bodenabstands-Änderungen automatisch.
      */
     animateFog(delta) {
         const wisps = this.fogGroup.children;
@@ -1095,8 +1215,10 @@ export class TerrainViewer {
         const density = Math.min(100, Math.max(0, this.options.fogDensity));
         const active = Math.ceil(wisps.length * (density / 100));
         this.fogTime += delta;
-        const baseY = this.fogBaseY();
-        const band = this.fogBandHeight();
+        const sizeFactor = this.fogSizeFactor();
+        const xLimit = this.fogXLimit();
+        const zHalf = this.fogZHalf();
+        const fadeDist = Math.min(FOG_FADE_DIST, xLimit);
         const maxOpacity = 0.4 * Math.sqrt(density / 100);
         for (let i = 0; i < wisps.length; i++) {
             const wisp = wisps[i];
@@ -1109,17 +1231,27 @@ export class TerrainViewer {
             }
             wisp.visible = true;
             wisp.position.x += FOG_DRIFT_SPEED * data.speedFactor * delta;
-            if (wisp.position.x > FOG_LIMIT) {
-                wisp.position.x = -FOG_LIMIT;
-                wisp.position.z = (Math.random() - 0.5) * this.worldDepth * 0.85;
-                data.heightFraction = Math.random();
+            // Grössenänderung verkleinert den Bewegungsraum — zurückführen
+            wisp.position.z = Math.max(-zHalf, Math.min(zHalf, wisp.position.z));
+            if (wisp.position.x > xLimit || !this.fogInsideShape(wisp.position.x, wisp.position.z)) {
+                this.fogRespawn(wisp, true);
             }
-            wisp.position.y = baseY + data.heightFraction * band
+            // Über der Geländeoberfläche schweben (leicht wabernd)
+            wisp.position.y = this.fogGroundY(wisp.position.x, wisp.position.z)
+                + (1.5 + data.heightFraction * 3) * sizeFactor
                 + Math.sin(this.fogTime * 0.25 + data.phase) * 0.7;
+            // Abstand zur Austrittskante in Driftrichtung (Kreis/Sechseck: sondieren)
+            let distToExit = Math.min(fadeDist, xLimit - wisp.position.x);
+            for (let d = 3; d < distToExit; d += 3) {
+                if (!this.fogInsideShape(wisp.position.x + d, wisp.position.z)) {
+                    distToExit = d;
+                    break;
+                }
+            }
             const positionFade = Math.max(0, Math.min(
                 1,
-                (wisp.position.x + FOG_LIMIT) / FOG_FADE_DIST,
-                (FOG_LIMIT - wisp.position.x) / FOG_FADE_DIST
+                (wisp.position.x - data.entryX) / fadeDist,
+                distToExit / fadeDist
             ));
             // leichtes An- und Abschwellen, damit die Schwaden lebendig wirken
             const pulse = 0.75 + 0.25 * Math.sin(this.fogTime * 0.4 + data.phase * 1.7);
@@ -1233,6 +1365,13 @@ export class TerrainViewer {
 
     setFogDensity(percent) {
         this.options.fogDensity = percent; // greift im nächsten Animationsframe
+    }
+
+    setFogSize(percent) {
+        this.options.fogSize = percent;
+        for (const wisp of this.fogGroup.children) {
+            wisp.scale.setScalar(this.fogSizeFactor());
+        }
     }
 
     /** Flacker-Hüllkurve eines Blitzes: zwei schnell abklingende Pulse. */

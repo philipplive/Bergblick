@@ -1,6 +1,6 @@
 import { TerrainViewer } from './terrain.js';
 import { buildGridMesh, buildShapeMesh, computeAmbientOcclusion, insideShape, sampleHeight } from './mesh.js';
-import { buildBinarySTL, buildWebViewerHTML, buildZip, downloadBlob, heightmapToPNG } from './exporter.js';
+import { buildBinarySTL, buildWebViewerHTML, buildZip, downloadBlob } from './exporter.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -347,6 +347,9 @@ map.on('mouseup', (e) => {
             );
         }
     }
+    // Direkt auf den gewählten Bereich zoomen (nur beim Aufziehen — beim
+    // Anpassen über die Griffe bleibt der Kartenausschnitt stehen)
+    map.flyToBounds(selection.bounds.pad(0.4), { duration: 0.8 });
 });
 
 // ---------------------------------------------------------------------------
@@ -354,12 +357,20 @@ map.on('mouseup', (e) => {
 // ---------------------------------------------------------------------------
 
 const markers = []; // { id, latlng, color, layer }
-const paths = [];   // { id, latlngs: [L.LatLng, …], color, layer }
+const paths = [];   // { id, latlngs: [L.LatLng, …], color, lineType, layer }
 const labels = [];  // { id, latlng, text, layer }
+
+// Linientypen für Wege: dash = Leaflet-dashArray (null = durchgezogen)
+const PATH_LINE_TYPES = {
+    solid: { label: 'Strich', dash: null },
+    dotted: { label: 'Gepunktet', dash: '0.1 8' },
+    dashed: { label: 'Gestrichelt', dash: '8 8' },
+};
 
 // Startwerte neuer Elemente — angepasst wird danach direkt in der Liste
 const DEFAULT_MARKER_COLOR = '#e5484d';
 const DEFAULT_PATH_COLOR = '#ff7733';
+const DEFAULT_PATH_LINE_TYPE = 'solid';
 const DEFAULT_LABEL_TEXT = 'Gipfel';
 
 let markerSeq = 0;
@@ -495,9 +506,12 @@ function renderPathHandles(path) {
 }
 
 /** Fertiger Weg (z. B. aus einem Projekt-Import). */
-function createPath(latlngs, color, id) {
-    const layer = L.polyline(latlngs, { ...PATH_STYLE, color }).addTo(map);
-    const entry = { id, latlngs, color, layer };
+function createPath(latlngs, color, id, lineType = DEFAULT_PATH_LINE_TYPE) {
+    if (!PATH_LINE_TYPES[lineType]) lineType = DEFAULT_PATH_LINE_TYPE;
+    const layer = L.polyline(latlngs, {
+        ...PATH_STYLE, color, dashArray: PATH_LINE_TYPES[lineType].dash,
+    }).addTo(map);
+    const entry = { id, latlngs, color, lineType, layer };
     paths.push(entry);
     renderPathHandles(entry);
 }
@@ -508,6 +522,7 @@ function addPathPoint(latlng) {
         draftPath = {
             latlngs: [],
             color,
+            lineType: DEFAULT_PATH_LINE_TYPE,
             layer: L.polyline([], { ...PATH_STYLE, color, dashArray: '6 6' }).addTo(map),
         };
     }
@@ -520,7 +535,7 @@ function addPathPoint(latlng) {
 function finishPath() {
     if (!draftPath) return;
     if (draftPath.latlngs.length >= 2) {
-        draftPath.layer.setStyle({ dashArray: null });
+        draftPath.layer.setStyle({ dashArray: PATH_LINE_TYPES[draftPath.lineType].dash });
         const entry = { id: ++pathSeq, ...draftPath };
         paths.push(entry);
         renderPathHandles(entry);
@@ -581,7 +596,22 @@ function renderOverlayList() {
             p.color = v;
             p.layer.setStyle({ color: v });
         });
-        addRow(`Weg ${p.id}`, () => removePath(p), color, nameSpan(`Weg ${p.id}`));
+        const lineType = document.createElement('select');
+        lineType.className = 'line-type';
+        lineType.title = 'Linientyp ändern';
+        for (const [value, def] of Object.entries(PATH_LINE_TYPES)) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = def.label;
+            lineType.appendChild(option);
+        }
+        lineType.value = p.lineType;
+        lineType.addEventListener('change', () => {
+            p.lineType = lineType.value;
+            p.layer.setStyle({ dashArray: PATH_LINE_TYPES[p.lineType].dash });
+            updateOverlays3D();
+        });
+        addRow(`Weg ${p.id}`, () => removePath(p), color, nameSpan(`Weg ${p.id}`), lineType);
     }
 
     for (const l of labels) {
@@ -698,7 +728,9 @@ function projectOverlays() {
             }
         }
         if (run.length >= 2) runs.push(run);
-        if (runs.length) projectedPaths.push({ id: path.id, color: path.color, runs });
+        if (runs.length) {
+            projectedPaths.push({ id: path.id, color: path.color, lineType: path.lineType, runs });
+        }
     }
 
     const projectedLabels = [];
@@ -862,6 +894,9 @@ $('btn-generate').addEventListener('click', async () => {
             exaggeration: Number($('opt-exaggeration').value),
             basePercent: Number($('opt-base').value),
             groundOffset: Number($('opt-ground-offset').value),
+            // fürs Gelände-Folgen und Beschneiden der Nebelschwaden
+            heightGrid: rawGrid,
+            shape: selection.type,
             // AO wird einmalig beim Generieren mit der aktuellen Überhöhung
             // gebacken; der Überhöhungs-Regler ändert sie danach nicht mehr
             aoGrid: {
@@ -998,6 +1033,11 @@ $('opt-fog').addEventListener('input', (e) => {
     viewer.setFogDensity(Number(e.target.value));
 });
 
+$('opt-fog-size').addEventListener('input', (e) => {
+    $('out-fog-size').textContent = `${e.target.value} %`;
+    viewer.setFogSize(Number(e.target.value));
+});
+
 // Export-Sichtbegrenzungen (wirken nur im exportierten Viewer)
 $('opt-tilt-limit').addEventListener('input', (e) => {
     $('out-tilt-limit').textContent = `${e.target.value}°`;
@@ -1017,7 +1057,7 @@ const SETTING_IDS = [
     'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
     'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev', 'opt-exposure',
     'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-rain',
-    'opt-lightning', 'opt-fog',
+    'opt-lightning', 'opt-fog', 'opt-fog-size',
     'opt-model-width',
     'opt-tilt-limit', 'opt-zoom-limit',
 ];
@@ -1044,6 +1084,7 @@ function collectProject() {
         paths: paths.map((p) => ({
             id: p.id,
             color: p.color,
+            lineType: p.lineType,
             points: p.latlngs.map((ll) => [ll.lat, ll.lng]),
         })),
         labels: labels.map((l) => ({ id: l.id, lat: l.latlng.lat, lng: l.latlng.lng, text: l.text })),
@@ -1078,6 +1119,9 @@ function collectViewerConfig() {
         cloudDepth: viewer.worldDepth,
         rainFloorY: viewer.groundOffsetY(),
         fogDensity: Number($('opt-fog').value),
+        fogSize: Number($('opt-fog-size').value),
+        fogShape: currentModel?.shape ?? 'rect',
+        fogHeightField: viewer.getFogHeightField(),
         fogBaseY: viewer.fogBaseY(),
         fogBandHeight: viewer.fogBandHeight(),
         labels: viewer.getLabelPlacements(),
@@ -1121,7 +1165,7 @@ function applyProject(projekt) {
         createMarker(L.latLng(m.lat, m.lng), m.color, Number(m.id));
     }
     for (const p of projekt.paths ?? []) {
-        createPath(p.points.map(([lat, lng]) => L.latLng(lat, lng)), p.color, Number(p.id));
+        createPath(p.points.map(([lat, lng]) => L.latLng(lat, lng)), p.color, Number(p.id), p.lineType);
     }
     for (const l of projekt.labels ?? []) {
         createLabel(L.latLng(l.lat, l.lng), String(l.text ?? ''), Number(l.id));
@@ -1219,20 +1263,6 @@ $('btn-export-stl').addEventListener('click', () => {
     });
     downloadBlob(new Blob([stl], { type: 'model/stl' }), 'terrain.stl');
     setStatus('STL exportiert.');
-});
-
-$('btn-export-png').addEventListener('click', () => {
-    const dataUrl = viewer.screenshot();
-    if (!dataUrl) return;
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = 'terrain.png';
-    a.click();
-});
-
-$('btn-export-heightmap').addEventListener('click', () => {
-    if (!currentModel) return;
-    heightmapToPNG(currentModel.rawGrid).then((blob) => downloadBlob(blob, 'heightmap.png'));
 });
 
 /** Canvas als Bilddatei-Bytes (für die separaten Textur-Dateien im ZIP). */

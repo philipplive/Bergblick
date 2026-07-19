@@ -81,33 +81,6 @@ export function buildBinarySTL(mesh, { exaggeration, basePercent, modelWidthMM }
     return buffer;
 }
 
-/** Höhenraster als normalisiertes Graustufen-PNG (weiss = höchster Punkt). */
-export function heightmapToPNG(grid) {
-    const { heights, gridW, gridH } = grid;
-    let min = Infinity;
-    let max = -Infinity;
-    for (const h of heights) {
-        if (h < min) min = h;
-        if (h > max) max = h;
-    }
-    const range = Math.max(1e-9, max - min);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = gridW;
-    canvas.height = gridH;
-    const ctx = canvas.getContext('2d');
-    const img = ctx.createImageData(gridW, gridH);
-    for (let i = 0; i < heights.length; i++) {
-        const v = Math.round(((heights[i] - min) / range) * 255);
-        img.data[i * 4] = v;
-        img.data[i * 4 + 1] = v;
-        img.data[i * 4 + 2] = v;
-        img.data[i * 4 + 3] = 255;
-    }
-    ctx.putImageData(img, 0, 0);
-    return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-}
-
 const CRC_TABLE = (() => {
     const table = new Uint32Array(256);
     for (let n = 0; n < 256; n++) {
@@ -207,7 +180,7 @@ export function buildWebViewerHTML() {
   wieder laden, um das Projekt weiterzubearbeiten. Direkt in der projekt.json
   editierbar (ohne Neu-Export): Hintergrundfarbe (viewer.backdrop), Marker-
   und Wegfarben (markers[].color / paths[].color), Wolken (viewer.clouds),
-  Nebelschwaden (viewer.fogDensity), Licht und Schatten (viewer.sunPosition /
+  Nebelschwaden (viewer.fogDensity / viewer.fogSize), Licht und Schatten (viewer.sunPosition /
   shadowRadius / shadowIntensity).
 
   Einbindung auf einer Website:
@@ -249,13 +222,14 @@ export function buildWebViewerHTML() {
     karte.contentWindow.terrainViewer.setClouds({ opacity: 50 });
     karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity, rain, lightning }
 
-  Nebelschwaden steuern (density: 0–100):
+  Nebelschwaden steuern (density: 0–100, size: Grösse in Prozent):
     karte.contentWindow.postMessage({ type: 'fog', density: 60 }, '*');
     karte.contentWindow.postMessage({ type: 'fog', density: 0 }, '*'); // Nebel aus
+    karte.contentWindow.postMessage({ type: 'fog', size: 150 }, '*');  // grössere Schwaden
 
   Bei gleicher Herkunft auch direkt:
-    karte.contentWindow.terrainViewer.setFog({ density: 60 });
-    karte.contentWindow.terrainViewer.getFog(); // { density }
+    karte.contentWindow.terrainViewer.setFog({ density: 60, size: 150 });
+    karte.contentWindow.terrainViewer.getFog(); // { density, size }
 -->
 <html lang="de">
 <head>
@@ -515,13 +489,75 @@ const LIGHTNING_MAX_SEGMENTS = 90;
 const LIGHTNING_DURATION = 0.3;
 
 // --- Nebelschwaden (flache, weiche Sprite-Bänder über den unteren Hanglagen) ---
-const fogConfig = { density: CONFIG.fogDensity ?? 0 };
+const fogConfig = { density: CONFIG.fogDensity ?? 0, size: CONFIG.fogSize ?? 100 };
 const FOG_BASE_Y = CONFIG.fogBaseY ?? 0;
-const FOG_BAND_HEIGHT = CONFIG.fogBandHeight ?? 8;
+const FOG_BAND_HEIGHT = CONFIG.fogBandHeight ?? 8;      // Rückfall ohne Höhenfeld
+const FOG_FIELD = CONFIG.fogHeightField || null;         // Geländeoberfläche (Szenen-Y)
+const FOG_SHAPE = CONFIG.fogShape || 'rect';
 const FOG_MAX_WISPS = 16;
-const FOG_LIMIT = 62;
+const FOG_EDGE_MARGIN = 14;   // Randabstand einer Schwade (bei 100 % Grösse)
 const FOG_FADE_DIST = 20;
 const FOG_DRIFT_SPEED = 1.6;
+const WORLD_HALF_WIDTH = 50;  // Modell ist 100 Einheiten breit (wie im Editor)
+
+// Bewegungsraum der Schwaden: Modellgrundfläche minus Randabstand, damit auch
+// grosse Schwaden vollständig über dem Gelände bleiben
+const fogSizeFactor = () => Math.max(0.1, fogConfig.size / 100);
+const fogXLimit = () => Math.max(6, WORLD_HALF_WIDTH - FOG_EDGE_MARGIN * fogSizeFactor());
+const fogZHalf = () => Math.max(2, CLOUD_DEPTH / 2 - FOG_EDGE_MARGIN * fogSizeFactor());
+
+// Liegt (x, z) innerhalb der um den Randabstand geschrumpften Grundform?
+function fogInsideShape(x, z) {
+    const halfD = CLOUD_DEPTH / 2;
+    const margin = FOG_EDGE_MARGIN * fogSizeFactor();
+    const ux = (x / WORLD_HALF_WIDTH) / Math.max(0.1, 1 - margin / WORLD_HALF_WIDTH);
+    const uy = (-z / halfD) / Math.max(0.1, 1 - margin / halfD);
+    if (FOG_SHAPE === 'circle') return ux * ux + uy * uy <= 1.0001;
+    if (FOG_SHAPE === 'hexagon') {
+        const hy = (uy * Math.sqrt(3)) / 2;
+        const r = Math.hypot(ux, hy);
+        const sectorAngle = Math.PI / 3;
+        const theta = Math.atan2(hy, ux);
+        const phi = ((theta % sectorAngle) + sectorAngle) % sectorAngle;
+        return r <= Math.cos(Math.PI / 6) / Math.cos(phi - Math.PI / 6) + 1e-4;
+    }
+    return Math.abs(ux) <= 1 && Math.abs(uy) <= 1;
+}
+
+// Geländeoberfläche (Szenen-Y) an (x, z), bilinear aus dem Höhenfeld
+function fogGroundY(x, z) {
+    if (!FOG_FIELD) return FOG_BASE_Y;
+    const { gridW, gridH, data } = FOG_FIELD;
+    const fx = Math.min(Math.max(x / (WORLD_HALF_WIDTH * 2) + 0.5, 0), 1) * (gridW - 1);
+    const fz = Math.min(Math.max(z / CLOUD_DEPTH + 0.5, 0), 1) * (gridH - 1);
+    const x0 = Math.min(Math.floor(fx), gridW - 2);
+    const z0 = Math.min(Math.floor(fz), gridH - 2);
+    const tx = fx - x0;
+    const tz = fz - z0;
+    return (data[z0 * gridW + x0] * (1 - tx) + data[z0 * gridW + x0 + 1] * tx) * (1 - tz)
+        + (data[(z0 + 1) * gridW + x0] * (1 - tx) + data[(z0 + 1) * gridW + x0 + 1] * tx) * tz;
+}
+
+// Schwade an eine gültige Position setzen; atEntry = an die westliche Eintrittskante
+function fogRespawn(wisp, atEntry) {
+    const xLimit = fogXLimit();
+    const zHalf = fogZHalf();
+    const data = wisp.userData;
+    data.heightFraction = Math.random();
+    for (let attempt = 0; attempt < 30; attempt++) {
+        const z = (Math.random() * 2 - 1) * zHalf;
+        let x = atEntry ? -xLimit : (Math.random() * 2 - 1) * xLimit;
+        while (atEntry && x < xLimit && !fogInsideShape(x, z)) x += 3;
+        if (fogInsideShape(x, z)) {
+            wisp.position.x = x;
+            wisp.position.z = z;
+            data.entryX = atEntry ? x : x - FOG_FADE_DIST;
+            return;
+        }
+    }
+    wisp.position.set(0, FOG_BASE_Y, 0); // Rückfall: Mitte ist immer gültig
+    data.entryX = -FOG_FADE_DIST;
+}
 
 const cloudGroup = new THREE.Group();
 scene.add(cloudGroup);
@@ -910,23 +946,25 @@ function makeFogWisp() {
 for (let i = 0; i < FOG_MAX_WISPS; i++) {
     const wisp = makeFogWisp();
     wisp.userData.speedFactor = 0.5 + Math.random() * 0.7;
-    wisp.userData.heightFraction = Math.random();
     wisp.userData.phase = Math.random() * Math.PI * 2;
     wisp.userData.fade = 0;
-    wisp.position.set(
-        (Math.random() * 2 - 1) * FOG_LIMIT,
-        FOG_BASE_Y,
-        (Math.random() - 0.5) * CLOUD_DEPTH * 0.85
-    );
+    wisp.scale.setScalar(fogSizeFactor());
+    wisp.position.y = FOG_BASE_Y;
+    fogRespawn(wisp, false);
     fogGroup.add(wisp);
 }
 
-// Schwaden driften langsam von West nach Ost und wabern in Höhe und Deckkraft
+// Schwaden driften langsam von West nach Ost, schmiegen sich an die
+// Geländeoberfläche und wabern dabei leicht in Höhe und Deckkraft
 function animateFog(delta) {
     const wisps = fogGroup.children;
     const density = Math.min(100, Math.max(0, fogConfig.density));
     const active = Math.ceil(wisps.length * (density / 100));
     fogTime += delta;
+    const sizeFactor = fogSizeFactor();
+    const xLimit = fogXLimit();
+    const zHalf = fogZHalf();
+    const fadeDist = Math.min(FOG_FADE_DIST, xLimit);
     const maxOpacity = 0.4 * Math.sqrt(density / 100);
     for (let i = 0; i < wisps.length; i++) {
         const wisp = wisps[i];
@@ -938,17 +976,29 @@ function animateFog(delta) {
         }
         wisp.visible = true;
         wisp.position.x += FOG_DRIFT_SPEED * data.speedFactor * delta;
-        if (wisp.position.x > FOG_LIMIT) {
-            wisp.position.x = -FOG_LIMIT;
-            wisp.position.z = (Math.random() - 0.5) * CLOUD_DEPTH * 0.85;
-            data.heightFraction = Math.random();
+        // Grössenänderung verkleinert den Bewegungsraum — zurückführen
+        wisp.position.z = Math.max(-zHalf, Math.min(zHalf, wisp.position.z));
+        if (wisp.position.x > xLimit || !fogInsideShape(wisp.position.x, wisp.position.z)) {
+            fogRespawn(wisp, true);
         }
-        wisp.position.y = FOG_BASE_Y + data.heightFraction * FOG_BAND_HEIGHT
+        // Über der Geländeoberfläche schweben; ohne Höhenfeld (alte Exporte)
+        // gilt das bisherige Höhenband über der Sockeloberkante
+        wisp.position.y = (FOG_FIELD
+            ? fogGroundY(wisp.position.x, wisp.position.z) + (1.5 + data.heightFraction * 3) * sizeFactor
+            : FOG_BASE_Y + data.heightFraction * FOG_BAND_HEIGHT)
             + Math.sin(fogTime * 0.25 + data.phase) * 0.7;
+        // Abstand zur Austrittskante in Driftrichtung (Kreis/Sechseck: sondieren)
+        let distToExit = Math.min(fadeDist, xLimit - wisp.position.x);
+        for (let d = 3; d < distToExit; d += 3) {
+            if (!fogInsideShape(wisp.position.x + d, wisp.position.z)) {
+                distToExit = d;
+                break;
+            }
+        }
         const positionFade = Math.max(0, Math.min(
             1,
-            (wisp.position.x + FOG_LIMIT) / FOG_FADE_DIST,
-            (FOG_LIMIT - wisp.position.x) / FOG_FADE_DIST
+            (wisp.position.x - data.entryX) / fadeDist,
+            distToExit / fadeDist
         ));
         const pulse = 0.75 + 0.25 * Math.sin(fogTime * 0.4 + data.phase * 1.7);
         data.material.opacity = maxOpacity * data.fade * positionFade * pulse;
@@ -1000,6 +1050,10 @@ const terrainViewer = {
     setFog(options = {}) {
         if (typeof options.density === 'number' && Number.isFinite(options.density)) {
             fogConfig.density = Math.min(100, Math.max(0, options.density));
+        }
+        if (typeof options.size === 'number' && Number.isFinite(options.size)) {
+            fogConfig.size = Math.min(400, Math.max(10, options.size));
+            for (const wisp of fogGroup.children) wisp.scale.setScalar(fogSizeFactor());
         }
         return { ...fogConfig };
     },
