@@ -62,8 +62,8 @@ export function patchShadowShader(shaderChunkLib) {
 }
 
 patchShadowShader(THREE.ShaderChunk);
-const CLOUD_LIMIT = WORLD_WIDTH * 0.85; // Zugstrecke der Wolken (±x)
-const CLOUD_FADE_DIST = 30;             // Strecke für Ein-/Ausblenden am Rand
+const CLOUD_LIMIT = WORLD_WIDTH * 0.6;  // Zugstrecke (±x): max. 10 % der Modellbreite über den Rand
+const CLOUD_FADE_DIST = 20;             // Strecke für Ein-/Ausblenden am Rand
 const RAIN_MAX_DROPS = 60;              // Tropfen pro Wolke bei 100 % Regen
 const RAIN_FALL_SPEED = 42;             // Fallgeschwindigkeit (Einheiten pro Sekunde)
 const RAIN_DROP_LENGTH = 1.4;           // Länge eines Tropfen-Strichs
