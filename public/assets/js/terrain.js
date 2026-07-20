@@ -309,6 +309,7 @@ export class TerrainViewer {
             cloudSpeed: 50,   // Prozent
             cloudSize: 100,   // Prozent
             cloudOpacity: 90,  // Deckkraft in Prozent
+            cloudColor: '#ffffff', // Grundfarbe der Wolken
             cloudRain: 0,      // Regenstärke in Prozent (0 = kein Regen)
             cloudLightning: 0, // Blitz-Intensität in Prozent (0 = keine Blitze)
             fogDensity: 0,     // Dichte der Nebelschwaden in Prozent (0 = kein Nebel)
@@ -1072,8 +1073,12 @@ export class TerrainViewer {
             depthWrite: false,
             rotation: (Math.random() - 0.5) * 0.6,
         });
-        cloud.userData.baseShade = 0.94 + Math.random() * 0.06; // fürs Blitz-Aufleuchten
-        material.color.setScalar(cloud.userData.baseShade);
+        cloud.userData.baseShade = 0.94 + Math.random() * 0.06; // leichte Helligkeitsvariation
+        // Grundfarbe pro Wolke leicht abgedunkelt merken; animateClouds/-Lightning
+        // setzen die Materialfarbe daraus (Blitz-Aufleuchten addiert darauf).
+        cloud.userData.baseColor = new THREE.Color(this.options.cloudColor)
+            .multiplyScalar(cloud.userData.baseShade);
+        material.color.copy(cloud.userData.baseColor);
         cloud.userData.material = material;
 
         const puffs = 5 + Math.floor(Math.random() * 4);
@@ -1371,6 +1376,15 @@ export class TerrainViewer {
         this.options.cloudOpacity = percent; // greift im nächsten Animationsframe
     }
 
+    setCloudColor(hex) {
+        this.options.cloudColor = hex;
+        for (const cloud of this.cloudGroup.children) {
+            cloud.userData.baseColor = new THREE.Color(hex)
+                .multiplyScalar(cloud.userData.baseShade);
+            cloud.userData.material?.color.copy(cloud.userData.baseColor);
+        }
+    }
+
     setCloudRain(percent) {
         this.options.cloudRain = percent; // greift im nächsten Animationsframe
     }
@@ -1473,7 +1487,9 @@ export class TerrainViewer {
         this.boltMesh.visible = false;
         this.boltMesh.material.opacity = 0;
         this.lightningLight.intensity = 0;
-        this.flashCloud?.userData.material?.color.setScalar(this.flashCloud.userData.baseShade ?? 1);
+        if (this.flashCloud?.userData.baseColor) {
+            this.flashCloud.userData.material?.color.copy(this.flashCloud.userData.baseColor);
+        }
         this.flashCloud = null;
     }
 
@@ -1493,9 +1509,11 @@ export class TerrainViewer {
             const envelope = this.lightningEnvelope(this.boltTime);
             this.boltMesh.material.opacity = envelope;
             this.lightningLight.intensity = envelope * 12000;
-            this.flashCloud?.userData.material?.color.setScalar(
-                (this.flashCloud.userData.baseShade ?? 1) + envelope * 1.4
-            );
+            if (this.flashCloud?.userData.baseColor) {
+                this.flashCloud.userData.material?.color
+                    .copy(this.flashCloud.userData.baseColor)
+                    .addScalar(envelope * 1.4);
+            }
         } else {
             this.lightningCooldown -= delta;
             if (this.lightningCooldown <= 0) {

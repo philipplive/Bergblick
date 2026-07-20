@@ -14,7 +14,7 @@ use Berglick\MapGenerator\Application;
  * POST api/test-export.php?name=<datei>  → schreibt den Request-Body als Datei
  */
 final class TestExportController {
-	private const array ALLOWED_EXTENSIONS = ['html', 'json', 'glb', 'jpg', 'jpeg', 'png'];
+	private const array ALLOWED_EXTENSIONS = ['html', 'json', 'glb', 'jpg', 'jpeg', 'png', 'webp'];
 
 	public function handle (array $query): void {
 		// JSON-Endpoint: Notices/Warnings gehören ins Log, nie in die Antwort

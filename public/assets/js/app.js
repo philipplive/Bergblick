@@ -1018,6 +1018,10 @@ $('opt-cloud-opacity').addEventListener('input', (e) => {
     viewer.setCloudOpacity(Number(e.target.value));
 });
 
+$('opt-cloud-color').addEventListener('input', (e) => {
+    viewer.setCloudColor(e.target.value);
+});
+
 $('opt-cloud-rain').addEventListener('input', (e) => {
     $('out-cloud-rain').textContent = `${e.target.value} %`;
     viewer.setCloudRain(Number(e.target.value));
@@ -1056,7 +1060,7 @@ const SETTING_IDS = [
     'opt-base', 'opt-ground-offset',
     'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
     'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev', 'opt-exposure',
-    'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-rain',
+    'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-color', 'opt-cloud-rain',
     'opt-lightning', 'opt-fog', 'opt-fog-size',
     'opt-model-width',
     'opt-tilt-limit', 'opt-zoom-limit',
@@ -1112,6 +1116,7 @@ function collectViewerConfig() {
             speed: Number($('opt-cloud-speed').value),
             size: Number($('opt-cloud-size').value),
             opacity: Number($('opt-cloud-opacity').value),
+            color: $('opt-cloud-color').value,
             rain: Number($('opt-cloud-rain').value),
             lightning: Number($('opt-lightning').value),
         },
@@ -1279,53 +1284,139 @@ function canvasToBytes(canvas, type, quality) {
 }
 
 /**
+ * Prüft einmalig, ob der Browser WebP über canvas.toBlob kodieren kann.
+ * (Manche Umgebungen liefern bei nicht unterstütztem Typ still ein PNG.)
+ */
+let webpSupport = null;
+function canEncodeWebP() {
+    if (webpSupport === null) {
+        const probe = document.createElement('canvas');
+        probe.width = probe.height = 1;
+        // toDataURL gibt bei Unterstützung einen "data:image/webp"-Prefix zurück
+        webpSupport = probe.toDataURL('image/webp').startsWith('data:image/webp');
+    }
+    return webpSupport;
+}
+
+/**
+ * Kodiert einen Canvas als WebP (falls möglich) oder fällt auf ein
+ * verlustbehaftetes Ausgangsformat (JPG) zurück. Gibt sowohl die Bytes als
+ * auch die passende Dateiendung zurück, damit Dateiname und Inhalt
+ * zusammenpassen. `basename` ist der Name ohne Endung (z. B. "textur-gelaende").
+ */
+async function encodeTexture(canvas, basename, quality) {
+    if (canEncodeWebP()) {
+        return { name: `${basename}.webp`, data: await canvasToBytes(canvas, 'image/webp', quality) };
+    }
+    return { name: `${basename}.jpg`, data: await canvasToBytes(canvas, 'image/jpeg', quality) };
+}
+
+/**
+ * Komprimiert ein GLB (aus dem GLTFExporter) mit EXT_meshopt_compression.
+ * three.js r170 bringt nur den Decoder mit; für den Encoder nutzen wir
+ * @gltf-transform + meshoptimizer. Beide liegen lokal unter assets/vendor/
+ * (gebündelt bzw. mit eingebettetem WASM), werden also ohne Internetzugang und
+ * ohne Drittanbieter-CDN geladen. Der Viewer liest das Ergebnis über den in
+ * exporter.js gesetzten MeshoptDecoder.
+ *
+ * Level 'medium' quantisiert schonender als 'high' — wichtig, weil COLOR_0 die
+ * gebackene AO-Verschattung trägt und die Höhen fein sind.
+ *
+ * Schlägt die Kompression fehl, wird das unkomprimierte GLB zurückgegeben,
+ * statt den Export scheitern zu lassen.
+ */
+async function compressGLB(glbArrayBuffer) {
+    try {
+        const [{ WebIO, meshopt, EXTMeshoptCompression }, { MeshoptEncoder }] = await Promise.all([
+            import('../vendor/gltf-transform.js'),
+            import('../vendor/meshopt_encoder.js'),
+        ]);
+        await MeshoptEncoder.ready;
+        const io = new WebIO()
+            .registerExtensions([EXTMeshoptCompression])
+            .registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
+        const doc = await io.readBinary(new Uint8Array(glbArrayBuffer));
+        await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
+        const out = await io.writeBinary(doc);
+        return { data: out, compressed: true };
+    } catch (err) {
+        console.warn('Meshopt-Kompression übersprungen (Fallback: unkomprimiertes GLB):', err);
+        return { data: new Uint8Array(glbArrayBuffer), compressed: false };
+    }
+}
+
+/**
  * Sammelt alle Dateien des Web-Exports (Viewer-HTML, Modell, projekt.json,
  * Texturen) — gemeinsame Basis für den ZIP-Download und den Test-Export.
+ * Gibt { files, glbInfo } zurück; glbInfo enthält die GLB-Grössen für die
+ * Statusmeldung.
  */
 async function collectWebExportFiles() {
     const glb = await viewer.exportGLB();
+    const compressedGlb = await compressGLB(glb);
     const viewerConfig = collectViewerConfig();
     const encoder = new TextEncoder();
 
     const files = [
         { name: 'terrain-3d.html', data: encoder.encode(buildWebViewerHTML()) },
-        { name: 'terrain.glb', data: new Uint8Array(glb) },
+        { name: 'terrain.glb', data: compressedGlb.data },
     ];
 
-    // Projektdatei: steuert den Viewer und ist im Editor wieder importierbar
+    // Texturen als separate Dateien (werden vom Viewer zur Laufzeit geladen).
+    // WebP, wo möglich (deutlich kleiner), sonst JPG-Fallback. Der Sockel
+    // braucht Transparenz → WebP verlustlos bzw. PNG-Fallback. Die tatsächliche
+    // Endung überschreibt die Vorgabe in viewerConfig, damit projekt.json auf
+    // die geschriebenen Dateien zeigt.
+    if (viewerConfig.terrainTexture) {
+        const tex = await encodeTexture(viewer.terrainMesh.material.map.image, 'textur-gelaende', 0.9);
+        viewerConfig.terrainTexture = tex.name;
+        files.push(tex);
+    }
+    if (viewerConfig.skirtTexture) {
+        const canvas = viewer.skirtMesh.material.map.image;
+        const skirt = canEncodeWebP()
+            // WebP verlustlos (quality 1) erhält die Transparenz und schlägt PNG in der Grösse
+            ? { name: 'textur-sockel.webp', data: await canvasToBytes(canvas, 'image/webp', 1) }
+            : { name: 'textur-sockel.png', data: await canvasToBytes(canvas, 'image/png') };
+        viewerConfig.skirtTexture = skirt.name;
+        files.push(skirt);
+    }
+    if (viewerConfig.backgroundImage) {
+        const bg = await encodeTexture(viewer.backgroundTexture.image, 'hintergrund', 0.88);
+        viewerConfig.backgroundImage = bg.name;
+        files.push(bg);
+    }
+
+    // Projektdatei zuletzt: nach den Texturen, damit die endgültigen
+    // Dateinamen (Endung je nach WebP-Unterstützung) in viewerConfig stehen.
     const projekt = collectProject();
     projekt.viewer = viewerConfig;
     files.push({ name: 'projekt.json', data: encoder.encode(JSON.stringify(projekt, null, 2)) });
 
-    // Texturen als separate Dateien (werden vom Viewer zur Laufzeit geladen)
-    if (viewerConfig.terrainTexture) {
-        files.push({
-            name: viewerConfig.terrainTexture,
-            data: await canvasToBytes(viewer.terrainMesh.material.map.image, 'image/jpeg', 0.9),
-        });
+    const glbInfo = {
+        compressed: compressedGlb.compressed,
+        rawKB: Math.round(glb.byteLength / 1024),
+        outKB: Math.round(compressedGlb.data.byteLength / 1024),
+    };
+    return { files, glbInfo };
+}
+
+/** Kurzer Grössen-Hinweis fürs Export-Statusfeld (GLB komprimiert/roh). */
+function glbExportInfo(info) {
+    if (!info) return '';
+    if (info.compressed) {
+        return ` (GLB ${info.outKB} KB, komprimiert aus ${info.rawKB} KB)`;
     }
-    if (viewerConfig.skirtTexture) {
-        files.push({
-            name: viewerConfig.skirtTexture,
-            data: await canvasToBytes(viewer.skirtMesh.material.map.image, 'image/png'),
-        });
-    }
-    if (viewerConfig.backgroundImage) {
-        files.push({
-            name: viewerConfig.backgroundImage,
-            data: await canvasToBytes(viewer.backgroundTexture.image, 'image/jpeg', 0.88),
-        });
-    }
-    return files;
+    return ` (GLB ${info.outKB} KB, unkomprimiert — Meshopt nicht verfügbar)`;
 }
 
 $('btn-export-web').addEventListener('click', async () => {
     if (!currentModel) return;
     setStatus('Erzeuge Web-Export …');
     try {
-        const files = await collectWebExportFiles();
+        const { files, glbInfo } = await collectWebExportFiles();
         downloadBlob(new Blob([buildZip(files)], { type: 'application/zip' }), 'terrain-3d.zip');
-        setStatus('Web-Export (ZIP) erstellt — entpacken, komplett hochladen, per <iframe> einbinden.');
+        setStatus(`Web-Export (ZIP) erstellt${glbExportInfo(glbInfo)} — entpacken, komplett hochladen, per <iframe> einbinden.`);
     } catch (err) {
         console.error(err);
         setStatus(`Fehler beim Web-Export: ${err.message}`);
@@ -1345,7 +1436,7 @@ $('btn-export-test').addEventListener('click', async () => {
                 throw new Error(result.error || `Server antwortete mit ${response.status}`);
             }
         };
-        const files = await collectWebExportFiles();
+        const { files, glbInfo } = await collectWebExportFiles();
         await upload('api/test-export.php?action=clear');
         for (const file of files) {
             await upload(`api/test-export.php?name=${encodeURIComponent(file.name)}`, file.data);
@@ -1353,7 +1444,7 @@ $('btn-export-test').addEventListener('click', async () => {
         const testUrl = `test/terrain-3d.html?v=${Date.now()}`;
         if (testWindow) testWindow.location = testUrl;
         else window.open(testUrl, '_blank');
-        setStatus('Test-Export unter /test/ abgelegt und im neuen Tab geöffnet.');
+        setStatus(`Test-Export unter /test/ abgelegt und im neuen Tab geöffnet${glbExportInfo(glbInfo)}.`);
     } catch (err) {
         console.error(err);
         if (testWindow) testWindow.close();

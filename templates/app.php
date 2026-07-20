@@ -204,6 +204,12 @@ declare(strict_types=1);
                 <span>Wolken-Deckkraft <output id="out-cloud-opacity">90 %</output></span>
                 <input type="range" id="opt-cloud-opacity" min="10" max="100" step="1" value="90">
             </label>
+            <div class="color-row">
+                <label class="color-field">
+                    <span>Wolkenfarbe</span>
+                    <input type="color" id="opt-cloud-color" value="#ffffff">
+                </label>
+            </div>
             <label class="field">
                 <span>Regen <output id="out-cloud-rain">0 %</output></span>
                 <input type="range" id="opt-cloud-rain" min="0" max="100" step="1" value="0">

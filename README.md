@@ -36,7 +36,7 @@ Danach im Browser öffnen: <http://localhost:8123>
 
 - **Kartenausschnitt wählen:** Der gewünschte Bereich wird direkt auf der Karte per Auswahlwerkzeug (Rechteck, Kreis oder Sechseck) festgelegt. Die Auswahl ist auf maximal 15 × 15 km begrenzt.
 - **Export als STL:** Das erzeugte Geländemodell kann STL exportiert werden – direkt geeignet für den 3D-Druck.
-- **Export als eigenständiges iframe:** Alternativ lässt sich das Modell als statischer, interaktiver Web-Viewer exportieren, der z. B. per `<iframe>` in eine eigene Website eingebettet werden kann.
+- **Export als eigenständiges iframe:** Alternativ lässt sich das Modell als statischer, interaktiver Web-Viewer exportieren, der z. B. per `<iframe>` in eine eigene Website eingebettet werden kann. Das Modell (`terrain.glb`) wird dabei mit `EXT_meshopt_compression` komprimiert (typisch ~85 % kleiner), die Texturen als WebP gespeichert (mit JPG- bzw. PNG-Fallback, falls der Browser kein WebP kodieren kann).
 
 ### API des exportierten iframes
 
@@ -67,10 +67,11 @@ karte.contentWindow.postMessage({ type: 'overlay-list' }, '*');
 
 // Wolken steuern (alle Felder optional)
 karte.contentWindow.postMessage(
-  { type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60, rain: 40 },
+  { type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60, color: '#ffffff', rain: 40 },
   '*'
 );
 karte.contentWindow.postMessage({ type: 'clouds', count: 0 }, '*'); // Wolken aus
+karte.contentWindow.postMessage({ type: 'clouds', color: '#cbd5e1' }, '*'); // Wolkenfarbe
 karte.contentWindow.postMessage({ type: 'clouds', rain: 0 }, '*');  // Regen aus
 </script>
 ```

@@ -212,15 +212,16 @@ export function buildWebViewerHTML() {
     karte.contentWindow.terrainViewer.getVisible('weg-1');  // true | false | null
     karte.contentWindow.terrainViewer.list();
 
-  Wolken steuern (alle Felder optional: count, speed, size, opacity, rain, lightning):
+  Wolken steuern (alle Felder optional: count, speed, size, opacity, color, rain, lightning):
     karte.contentWindow.postMessage({ type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60, rain: 40 }, '*');
     karte.contentWindow.postMessage({ type: 'clouds', count: 0 }, '*'); // Wolken aus
+    karte.contentWindow.postMessage({ type: 'clouds', color: '#cbd5e1' }, '*'); // Wolkenfarbe (z. B. graue Regenwolken)
     karte.contentWindow.postMessage({ type: 'clouds', rain: 0 }, '*');  // Regen aus
     karte.contentWindow.postMessage({ type: 'clouds', lightning: 60 }, '*'); // Gewitter an
 
   Bei gleicher Herkunft auch direkt:
     karte.contentWindow.terrainViewer.setClouds({ opacity: 50 });
-    karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity, rain, lightning }
+    karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity, color, rain, lightning }
 
   Nebelschwaden steuern (density: 0–100, size: Grösse in Prozent):
     karte.contentWindow.postMessage({ type: 'fog', density: 60 }, '*');
@@ -283,6 +284,7 @@ canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 // Weicher PCF-Schatten: Poisson-Disk-Kernel statt des stufigen Rasterkernels
 const PCF_BRANCH = ${JSON.stringify(PCF_POISSON_BRANCH)};
@@ -476,7 +478,7 @@ canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; }, {
 let tiltMaxPolar = Math.PI;
 
 // --- Wolken (weiche Sprite-Puffs + unsichtbare Schattenwerfer) ---
-const cloudConfig = { count: 0, speed: 50, size: 100, opacity: 90, rain: 0, lightning: 0, ...CONFIG.clouds };
+const cloudConfig = { count: 0, speed: 50, size: 100, opacity: 90, color: '#ffffff', rain: 0, lightning: 0, ...CONFIG.clouds };
 const CLOUD_BASE_Y = CONFIG.cloudBaseY;
 const CLOUD_DEPTH = CONFIG.cloudDepth;
 const RAIN_FLOOR_Y = CONFIG.rainFloorY || 0; // Regen/Blitze enden an der Modellunterkante
@@ -625,8 +627,11 @@ function makeCloud() {
         depthWrite: false,
         rotation: (Math.random() - 0.5) * 0.6,
     });
-    cloud.userData.baseShade = 0.94 + Math.random() * 0.06; // fürs Blitz-Aufleuchten
-    material.color.setScalar(cloud.userData.baseShade);
+    cloud.userData.baseShade = 0.94 + Math.random() * 0.06; // leichte Helligkeitsvariation
+    // Grundfarbe pro Wolke leicht abgedunkelt merken; Blitz-Aufleuchten addiert darauf.
+    cloud.userData.baseColor = new THREE.Color(cloudConfig.color)
+        .multiplyScalar(cloud.userData.baseShade);
+    material.color.copy(cloud.userData.baseColor);
     cloud.userData.material = material;
     const puffs = 5 + Math.floor(Math.random() * 4);
     for (let i = 0; i < puffs; i++) {
@@ -821,8 +826,8 @@ function endLightning() {
     boltMesh.visible = false;
     boltMesh.material.opacity = 0;
     lightningLight.intensity = 0;
-    if (flashCloud && flashCloud.userData.material) {
-        flashCloud.userData.material.color.setScalar(flashCloud.userData.baseShade || 1);
+    if (flashCloud && flashCloud.userData.material && flashCloud.userData.baseColor) {
+        flashCloud.userData.material.color.copy(flashCloud.userData.baseColor);
     }
     flashCloud = null;
 }
@@ -842,8 +847,8 @@ function animateLightning(delta) {
         const envelope = lightningEnvelope(boltTime);
         boltMesh.material.opacity = envelope;
         lightningLight.intensity = envelope * 12000;
-        if (flashCloud && flashCloud.userData.material) {
-            flashCloud.userData.material.color.setScalar((flashCloud.userData.baseShade || 1) + envelope * 1.4);
+        if (flashCloud && flashCloud.userData.material && flashCloud.userData.baseColor) {
+            flashCloud.userData.material.color.copy(flashCloud.userData.baseColor).addScalar(envelope * 1.4);
         }
     } else {
         lightningCooldown -= delta;
@@ -1038,10 +1043,20 @@ const terrainViewer = {
                 cloudConfig[key] = Math.max(0, options[key]);
             }
         }
+        if (typeof options.color === 'string') {
+            cloudConfig.color = options.color;
+        }
         if (cloudConfig.count !== previousCount) rebuildClouds();
         if (typeof options.size === 'number') {
             for (const cloud of cloudGroup.children) {
                 cloud.scale.setScalar(cloudConfig.size / 100);
+            }
+        }
+        if (typeof options.color === 'string') {
+            for (const cloud of cloudGroup.children) {
+                cloud.userData.baseColor = new THREE.Color(cloudConfig.color)
+                    .multiplyScalar(cloud.userData.baseShade);
+                cloud.userData.material?.color.copy(cloud.userData.baseColor);
             }
         }
         return { ...cloudConfig };
@@ -1171,7 +1186,11 @@ window.addEventListener('message', (event) => {
     }
 });
 
-new GLTFLoader().load(GLB_FILE, (gltf) => {
+// Der Loader bekommt den Meshopt-Decoder gesetzt, damit mit
+// EXT_meshopt_compression exportierte GLBs geladen werden können. Für
+// unkomprimierte GLBs bleibt er wirkungslos (rückwärtskompatibel).
+const gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+gltfLoader.load(GLB_FILE, (gltf) => {
     scene.add(gltf.scene);
     gltf.scene.traverse((object) => {
         if (/^(marker|weg)-/.test(object.name)) overlayObjects.set(object.name, object);
