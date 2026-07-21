@@ -78,6 +78,28 @@ export function patchShadowShader(shaderChunkLib) {
 }
 
 patchShadowShader(THREE.ShaderChunk);
+
+/**
+ * Klinkt Per-Vertex-Alpha in ein PointsMaterial: ein float-Attribut `aOpacity`
+ * (0..1 pro Flocke) moduliert die finale Fragment-Deckkraft. So kann jede
+ * Schneeflocke einzeln ein- und ausfaden, obwohl sich alle dasselbe Material
+ * teilen. Wird auch im Web-Export verwendet.
+ */
+export function patchSnowMaterial(material) {
+    material.onBeforeCompile = (shader) => {
+        shader.vertexShader = 'attribute float aOpacity;\nvarying float vOpacity;\n'
+            + shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                '#include <begin_vertex>\n    vOpacity = aOpacity;'
+            );
+        shader.fragmentShader = 'varying float vOpacity;\n'
+            + shader.fragmentShader.replace(
+                '#include <opaque_fragment>',
+                'diffuseColor.a *= vOpacity;\n#include <opaque_fragment>'
+            );
+    };
+}
+
 const CLOUD_LIMIT = WORLD_WIDTH * 0.6;  // Zugstrecke (±x): max. 10 % der Modellbreite über den Rand
 const CLOUD_FADE_DIST = 20;             // Strecke für Ein-/Ausblenden am Rand
 const RAIN_MAX_DROPS = 60;              // Tropfen pro Wolke bei 100 % Regen
@@ -89,6 +111,11 @@ const FOG_MAX_WISPS = 16;               // Nebelschwaden bei 100 % Dichte
 const FOG_EDGE_MARGIN = 14;             // Randabstand einer Schwade (bei 100 % Grösse)
 const FOG_FADE_DIST = 20;               // Strecke für Ein-/Ausblenden am Rand
 const FOG_DRIFT_SPEED = 1.6;            // maximale Driftgeschwindigkeit (Einheiten/s)
+const SNOW_MAX_FLAKES = 1400;           // Flockenzahl bei 100 % Schneefall
+const SNOW_FALL_SPEED = 3.5;            // Fallgeschwindigkeit (Einheiten pro Sekunde)
+const SNOW_DRIFT = 2.2;                 // seitliches Taumeln der Flocken (Amplitude)
+const SNOW_FADE_TIME = 2.5;             // Dauer für sanftes Ein-/Ausblenden (Sekunden)
+const SNOW_EDGE_INSET = 0.02;           // Sicherheitsabstand zum Kartenrand (Anteil der halben Breite)
 
 /** Weisses Textschild mit schwarzem Text und Rahmen für Ortstafeln. */
 export function makeLabelCanvas(text) {
@@ -204,6 +231,22 @@ function makeFogTexture() {
     return new THREE.CanvasTexture(canvas);
 }
 
+/** Runde, weiche Schneeflocke (radialer Verlauf) für die Flocken-Sprites. */
+export function makeSnowTexture() {
+    const size = 32;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.5, 'rgba(255,255,255,0.85)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    return canvas;
+}
+
 // Farbrampe für den Stil "Höhenfarben" (t = 0..1 über den Höhenbereich)
 export function hypsoColor(t, isWater) {
     if (isWater) return [0.24, 0.47, 0.66];
@@ -314,6 +357,7 @@ export class TerrainViewer {
             cloudLightning: 0, // Blitz-Intensität in Prozent (0 = keine Blitze)
             fogDensity: 0,     // Dichte der Nebelschwaden in Prozent (0 = kein Nebel)
             fogSize: 100,      // Grösse der Nebelschwaden in Prozent
+            snow: 0,           // Schneefall-Stärke in Prozent (0 = kein Schnee)
         };
 
         this.scene = new THREE.Scene();
@@ -469,6 +513,33 @@ export class TerrainViewer {
         this.lightningCooldown = 0;
         this.flashCloud = null;
 
+        // Schnee: szenenweit taumelnde Flocken (Points) über der Modellgrundfläche.
+        // Nicht an Wolken gebunden — Schnee fällt auch bei klarem Himmel. Jede
+        // Flocke hat ihre eigene Deckkraft (Per-Vertex-Alpha über das Attribut
+        // aOpacity, siehe patchSnowMaterial), damit sie beim Erscheinen einzeln
+        // einfaden kann statt schlagartig aufzupoppen.
+        this.snowMaterial = new THREE.PointsMaterial({
+            map: new THREE.CanvasTexture(makeSnowTexture()),
+            color: 0xffffff,
+            size: 1.1,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 1,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        patchSnowMaterial(this.snowMaterial);
+        this.snowGeometry = new THREE.BufferGeometry();
+        this.snowGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SNOW_MAX_FLAKES * 3), 3));
+        this.snowGeometry.setAttribute('aOpacity', new THREE.BufferAttribute(new Float32Array(SNOW_MAX_FLAKES), 1));
+        this.snowGeometry.setDrawRange(0, 0);
+        this.snowPoints = new THREE.Points(this.snowGeometry, this.snowMaterial);
+        this.snowPoints.frustumCulled = false; // Positionen ändern sich pro Frame
+        this.snowPoints.visible = false;
+        this.scene.add(this.snowPoints);
+        this.snowFlakes = []; // { baseX, baseZ, y, speed, phase, drift, fade, maxOpacity }
+        this.snowTime = 0;
+
         this.terrainMesh = null;
         this.skirtMesh = null;
 
@@ -481,6 +552,7 @@ export class TerrainViewer {
             this.animateClouds(delta);
             this.animateLightning(delta);
             this.animateFog(delta);
+            this.animateSnow(delta);
             this.clampOrbitAboveGround();
             this.controls.update();
             this.renderer.render(this.scene, this.camera);
@@ -732,6 +804,7 @@ export class TerrainViewer {
 
         this.rebuildClouds();
         this.rebuildFog();
+        this.rebuildSnow();
     }
 
     baseThickness() {
@@ -1279,6 +1352,145 @@ export class TerrainViewer {
             const pulse = 0.75 + 0.25 * Math.sin(this.fogTime * 0.4 + data.phase * 1.7);
             data.material.opacity = maxOpacity * data.fade * positionFade * pulse;
         }
+    }
+
+    /**
+     * Obere Grenze des Schneefalls (Flocken starten knapp über dem Gipfel bzw.
+     * über der Wolkenbasis, damit Schnee auch aus den Wolken zu kommen scheint).
+     */
+    snowTopY() {
+        return this.cloudBaseY() + 8;
+    }
+
+    /**
+     * Liegt (x, z) innerhalb der Modell-Grundform (Rechteck/Kreis/Sechseck)?
+     * Die Form wird um SNOW_EDGE_INSET einwärts geschrumpft (Division der
+     * normierten Koordinaten), damit die Flocken einen Sicherheitsabstand zum
+     * Kartenrand halten und keine über die Kante hinausragt.
+     */
+    snowInsideShape(x, z) {
+        const k = 1 - SNOW_EDGE_INSET;
+        return insideShape(
+            (x / (WORLD_WIDTH / 2)) / k,
+            (-z / (this.worldDepth / 2)) / k,
+            this.options.shape ?? 'rect'
+        );
+    }
+
+    /** Zufällige (x, z)-Position innerhalb der Grundform (für Spawn/Respawn). */
+    snowRandomXZ() {
+        const halfW = WORLD_WIDTH / 2;
+        const halfD = this.worldDepth / 2;
+        for (let attempt = 0; attempt < 30; attempt++) {
+            const x = (Math.random() * 2 - 1) * halfW;
+            const z = (Math.random() * 2 - 1) * halfD;
+            if (this.snowInsideShape(x, z)) return { x, z };
+        }
+        return { x: 0, z: 0 }; // Rückfall: Mitte liegt immer innerhalb
+    }
+
+    /**
+     * Baut den Flocken-Vorrat für die aktuelle Modellgrösse neu auf. Es gibt
+     * immer SNOW_MAX_FLAKES Flocken; wie viele gezeichnet werden, steuert der
+     * Regler pro Frame über den drawRange — so flackert beim Schieben nichts.
+     * Die Flocken fallen nur innerhalb der Grundform (nicht über den Rand): die
+     * seitliche Taumel-Amplitude (SNOW_DRIFT) wird beim Innen-Test einbezogen,
+     * damit auch die ausgelenkte Position drinnen bleibt.
+     */
+    rebuildSnow() {
+        if (!this.model) return;
+        const top = this.snowTopY();
+        const floor = this.groundOffsetY();
+        this.snowFlakes = Array.from({ length: SNOW_MAX_FLAKES }, () => {
+            const { x, z } = this.snowRandomXZ();
+            return {
+                baseX: x,
+                baseZ: z,
+                y: floor + Math.random() * (top - floor),
+                speed: 0.6 + Math.random() * 0.8,
+                phase: Math.random() * Math.PI * 2,
+                drift: 0.4 + Math.random() * 0.6,
+                // Startfortschritt zufällig, damit die Flocken nicht gemeinsam
+                // von 0 einfaden, sondern schon verteilt sichtbar sind
+                fade: Math.random(),
+                // leichte Helligkeits-/Deckkraftvariation pro Flocke
+                maxOpacity: 0.7 + Math.random() * 0.3,
+            };
+        });
+    }
+
+    /** Ziel-Deckkraft einer voll eingeblendeten Flocke (steigt leicht mit der Stärke). */
+    snowMaxOpacity() {
+        return 0.55 + 0.4 * Math.min(1, this.options.snow / 100);
+    }
+
+    /**
+     * Flocken fallen langsam und taumeln dabei seitlich; unten angekommen setzen
+     * sie oben an einer neuen, formintern zufälligen Stelle wieder auf. Der
+     * aktive Anteil (drawRange) folgt der Schnee-Stärke.
+     *
+     * Jede Flocke faded EINZELN ein: nach dem Spawn/Respawn wächst ihr fade-Wert
+     * über SNOW_FADE_TIME von 0 auf 1, kurz vor dem Aufsetzen faded sie wieder
+     * aus. Die Deckkraft wird pro Flocke über das aOpacity-Attribut in den
+     * Shader gegeben (patchSnowMaterial), damit die Flocken nicht gemeinsam,
+     * sondern individuell erscheinen und verschwinden.
+     */
+    animateSnow(delta) {
+        const flakes = this.snowFlakes;
+        const intensity = Math.min(100, Math.max(0, this.options.snow));
+        if (!flakes.length || intensity <= 0) {
+            this.snowPoints.visible = false;
+            return;
+        }
+        this.snowPoints.visible = true;
+        this.snowTime += delta;
+        const top = this.snowTopY();
+        const floor = this.groundOffsetY();
+        const span = Math.max(1, top - floor);
+        const maxOpacity = this.snowMaxOpacity();
+        const fadeStep = delta / SNOW_FADE_TIME;
+        const active = Math.max(1, Math.round(flakes.length * (intensity / 100)));
+        this.snowGeometry.setDrawRange(0, active);
+        const positions = this.snowGeometry.attributes.position.array;
+        const opacities = this.snowGeometry.attributes.aOpacity.array;
+        for (let i = 0; i < active; i++) {
+            const flake = flakes[i];
+            flake.y -= SNOW_FALL_SPEED * flake.speed * delta;
+            if (flake.y < floor) {
+                // Aufgesetzt: oben neu spawnen und wieder von 0 einfaden
+                flake.y = top;
+                flake.fade = 0;
+                const { x, z } = this.snowRandomXZ();
+                flake.baseX = x;
+                flake.baseZ = z;
+            }
+            // einzelnes Einfaden nach dem Spawn
+            flake.fade = Math.min(1, flake.fade + fadeStep);
+            // Anteil des Fallwegs, den die Flocke schon zurückgelegt hat (0 oben, 1 unten)
+            const fallen = 1 - (flake.y - floor) / span;
+            // kurz vor dem Aufsetzen (letzte 15 %) wieder ausfaden
+            const landFade = fallen > 0.85 ? Math.max(0, (1 - fallen) / 0.15) : 1;
+            // seitliches Taumeln, aber am Formrand abgeklemmt, damit keine
+            // Flocke über die Grundform hinausdriftet
+            let dx = Math.sin(this.snowTime * flake.drift + flake.phase) * SNOW_DRIFT;
+            let dz = Math.cos(this.snowTime * flake.drift * 0.7 + flake.phase) * SNOW_DRIFT;
+            if (!this.snowInsideShape(flake.baseX + dx, flake.baseZ + dz)) {
+                dx = 0;
+                dz = 0;
+            }
+            const o = i * 3;
+            positions[o] = flake.baseX + dx;
+            positions[o + 1] = flake.y;
+            positions[o + 2] = flake.baseZ + dz;
+            opacities[i] = maxOpacity * flake.maxOpacity * flake.fade * landFade;
+        }
+        this.snowGeometry.attributes.position.needsUpdate = true;
+        this.snowGeometry.attributes.aOpacity.needsUpdate = true;
+    }
+
+    setSnow(percent) {
+        this.options.snow = percent;
+        // Deckkraft wird pro Flocke in animateSnow gesetzt (aOpacity); hier nichts tun
     }
 
     /** Wolken folgen der Geländehöhe (z. B. bei Überhöhungs-Änderung). */

@@ -187,7 +187,7 @@ declare(strict_types=1);
         </section>
 
         <section class="panel">
-            <h2>3.4 Wolken, Regen, Blitze &amp; Nebel</h2>
+            <h2>3.4 Wolken, Regen, Blitze, Nebel &amp; Schnee</h2>
             <label class="field">
                 <span>Wolken <output id="out-clouds">6</output></span>
                 <input type="range" id="opt-clouds" min="0" max="20" step="1" value="6">
@@ -225,6 +225,10 @@ declare(strict_types=1);
             <label class="field">
                 <span>Nebel-Grösse <output id="out-fog-size">100 %</output></span>
                 <input type="range" id="opt-fog-size" min="50" max="200" step="5" value="100">
+            </label>
+            <label class="field">
+                <span>Schneefall <output id="out-snow">0 %</output></span>
+                <input type="range" id="opt-snow" min="0" max="100" step="1" value="0">
             </label>
         </section>
 

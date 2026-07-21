@@ -20,6 +20,8 @@ gerendert und bleiben beim Web-Export erhalten:
   eine echte Gewitterstimmung.
 - **Nebelschwaden:** Bodennaher Nebel legt sich in Grösse und Dichte einstellbar über
   die Täler und Hänge und bleibt dabei innerhalb der Modellgrenzen.
+- **Schneefall:** Innerhalb der Modellgrenzen taumeln Flocken langsam zu Boden; die
+  Schneemenge ist stufenlos regelbar (auch unabhängig von Wolken).
 - **Licht & Schatten:** Sonnenstand (Rotation und Höhenwinkel), Belichtung sowie Härte
   und Stärke der Schatten sind konfigurierbar – für weiche Morgen- oder harte
   Mittagsstimmungen.
@@ -73,6 +75,9 @@ karte.contentWindow.postMessage(
 karte.contentWindow.postMessage({ type: 'clouds', count: 0 }, '*'); // Wolken aus
 karte.contentWindow.postMessage({ type: 'clouds', color: '#cbd5e1' }, '*'); // Wolkenfarbe
 karte.contentWindow.postMessage({ type: 'clouds', rain: 0 }, '*');  // Regen aus
+
+// Schneefall (0–100)
+karte.contentWindow.postMessage({ type: 'snow', snow: 70 }, '*');
 </script>
 ```
 
@@ -89,6 +94,9 @@ viewer.list();                // alle steuerbaren Namen
 
 viewer.setClouds({ opacity: 50, rain: 40 });
 viewer.getClouds();           // { count, speed, size, opacity, rain }
+
+viewer.setSnow(70);           // Schneefall 0–100 (auch { snow: 70 })
+viewer.getSnow();             // { snow }
 ```
 
 Weitere Einstellungen (Hintergrundfarbe, Marker-/Wegfarben, Licht, Schatten) lassen sich direkt in der mitexportierten `projekt.json` anpassen, ohne erneut exportieren zu müssen.

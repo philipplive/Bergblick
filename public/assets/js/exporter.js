@@ -231,6 +231,14 @@ export function buildWebViewerHTML() {
   Bei gleicher Herkunft auch direkt:
     karte.contentWindow.terrainViewer.setFog({ density: 60, size: 150 });
     karte.contentWindow.terrainViewer.getFog(); // { density, size }
+
+  Schneefall steuern (snow: 0–100):
+    karte.contentWindow.postMessage({ type: 'snow', snow: 70 }, '*');
+    karte.contentWindow.postMessage({ type: 'snow', snow: 0 }, '*'); // Schnee aus
+
+  Bei gleicher Herkunft auch direkt:
+    karte.contentWindow.terrainViewer.setSnow(70);      // oder { snow: 70 }
+    karte.contentWindow.terrainViewer.getSnow();        // { snow }
 -->
 <html lang="de">
 <head>
@@ -502,6 +510,14 @@ const FOG_EDGE_MARGIN = 14;   // Randabstand einer Schwade (bei 100 % Grösse)
 const FOG_FADE_DIST = 20;
 const FOG_DRIFT_SPEED = 1.6;
 const WORLD_HALF_WIDTH = 50;  // Modell ist 100 Einheiten breit (wie im Editor)
+
+// --- Schnee ---
+const snowConfig = { snow: CONFIG.snow ?? 0 };
+const SNOW_MAX_FLAKES = 1400;
+const SNOW_FALL_SPEED = 3.5;
+const SNOW_DRIFT = 2.2;
+const SNOW_FADE_TIME = 2.5;   // Dauer für sanftes Ein-/Ausblenden (Sekunden)
+const SNOW_EDGE_INSET = 0.02; // Sicherheitsabstand zum Kartenrand (Anteil der halben Breite)
 
 // Bewegungsraum der Schwaden: Modellgrundfläche minus Randabstand, damit auch
 // grosse Schwaden vollständig über dem Gelände bleiben
@@ -1011,6 +1027,148 @@ function animateFog(delta) {
     }
 }
 
+// --- Schnee: szenenweit taumelnde Flocken (Points), nicht an Wolken gebunden ---
+function makeSnowTexture() {
+    const size = 32;
+    const snowCanvas = document.createElement('canvas');
+    snowCanvas.width = size;
+    snowCanvas.height = size;
+    const ctx = snowCanvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.5, 'rgba(255,255,255,0.85)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(snowCanvas);
+}
+const SNOW_TOP_Y = CLOUD_BASE_Y + 8;
+const snowMaterial = new THREE.PointsMaterial({
+    map: makeSnowTexture(),
+    color: 0xffffff,
+    size: 1.1,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    toneMapped: false,
+});
+// Per-Vertex-Alpha: das Attribut aOpacity moduliert die Deckkraft jeder Flocke
+// einzeln, damit sie beim Erscheinen individuell einfaden kann
+snowMaterial.onBeforeCompile = (shader) => {
+    shader.vertexShader = 'attribute float aOpacity;\\nvarying float vOpacity;\\n'
+        + shader.vertexShader.replace('#include <begin_vertex>',
+            '#include <begin_vertex>\\n    vOpacity = aOpacity;');
+    shader.fragmentShader = 'varying float vOpacity;\\n'
+        + shader.fragmentShader.replace('#include <opaque_fragment>',
+            'diffuseColor.a *= vOpacity;\\n#include <opaque_fragment>');
+};
+const snowGeometry = new THREE.BufferGeometry();
+snowGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SNOW_MAX_FLAKES * 3), 3));
+snowGeometry.setAttribute('aOpacity', new THREE.BufferAttribute(new Float32Array(SNOW_MAX_FLAKES), 1));
+snowGeometry.setDrawRange(0, 0);
+const snowPoints = new THREE.Points(snowGeometry, snowMaterial);
+snowPoints.frustumCulled = false;
+snowPoints.visible = false;
+scene.add(snowPoints);
+let snowTime = 0;
+
+// Schnee fällt nur innerhalb der Grundform (nicht über den Rand) — dieselbe
+// Formlogik wie beim Nebel (FOG_SHAPE), zusätzlich um SNOW_EDGE_INSET einwärts
+// geschrumpft, damit die Flocken einen Sicherheitsabstand zum Kartenrand halten
+function snowInsideShape(x, z) {
+    const k = 1 - SNOW_EDGE_INSET;
+    const ux = (x / WORLD_HALF_WIDTH) / k;
+    const uy = (-z / (CLOUD_DEPTH / 2)) / k;
+    if (FOG_SHAPE === 'circle') return ux * ux + uy * uy <= 1.0001;
+    if (FOG_SHAPE === 'hexagon') {
+        const hy = (uy * Math.sqrt(3)) / 2;
+        const r = Math.hypot(ux, hy);
+        const sectorAngle = Math.PI / 3;
+        const theta = Math.atan2(hy, ux);
+        const phi = ((theta % sectorAngle) + sectorAngle) % sectorAngle;
+        return r <= Math.cos(Math.PI / 6) / Math.cos(phi - Math.PI / 6) + 1e-4;
+    }
+    return Math.abs(ux) <= 1 && Math.abs(uy) <= 1;
+}
+function snowRandomXZ() {
+    const halfW = WORLD_HALF_WIDTH;
+    const halfD = CLOUD_DEPTH / 2;
+    for (let attempt = 0; attempt < 30; attempt++) {
+        const x = (Math.random() * 2 - 1) * halfW;
+        const z = (Math.random() * 2 - 1) * halfD;
+        if (snowInsideShape(x, z)) return { x, z };
+    }
+    return { x: 0, z: 0 };
+}
+const snowFlakes = [];
+for (let i = 0; i < SNOW_MAX_FLAKES; i++) {
+    const { x, z } = snowRandomXZ();
+    snowFlakes.push({
+        baseX: x,
+        baseZ: z,
+        y: RAIN_FLOOR_Y + Math.random() * (SNOW_TOP_Y - RAIN_FLOOR_Y),
+        speed: 0.6 + Math.random() * 0.8,
+        phase: Math.random() * Math.PI * 2,
+        drift: 0.4 + Math.random() * 0.6,
+        // Startfortschritt zufällig verteilt, leichte Deckkraftvariation
+        fade: Math.random(),
+        maxOpacity: 0.7 + Math.random() * 0.3,
+    });
+}
+// Ziel-Deckkraft einer voll eingeblendeten Flocke (steigt leicht mit der Stärke)
+function snowMaxOpacity() {
+    return 0.55 + 0.4 * Math.min(1, snowConfig.snow / 100);
+}
+
+// Jede Flocke faded einzeln ein (fade wächst nach dem Spawn) und kurz vor dem
+// Aufsetzen wieder aus; die Deckkraft geht pro Flocke über aOpacity in den Shader
+function animateSnow(delta) {
+    const intensity = Math.min(100, Math.max(0, snowConfig.snow));
+    if (intensity <= 0) {
+        snowPoints.visible = false;
+        return;
+    }
+    snowPoints.visible = true;
+    snowTime += delta;
+    const span = Math.max(1, SNOW_TOP_Y - RAIN_FLOOR_Y);
+    const maxOpacity = snowMaxOpacity();
+    const fadeStep = delta / SNOW_FADE_TIME;
+    const active = Math.max(1, Math.round(snowFlakes.length * (intensity / 100)));
+    snowGeometry.setDrawRange(0, active);
+    const positions = snowGeometry.attributes.position.array;
+    const opacities = snowGeometry.attributes.aOpacity.array;
+    for (let i = 0; i < active; i++) {
+        const flake = snowFlakes[i];
+        flake.y -= SNOW_FALL_SPEED * flake.speed * delta;
+        if (flake.y < RAIN_FLOOR_Y) {
+            flake.y = SNOW_TOP_Y;
+            flake.fade = 0;
+            const spawn = snowRandomXZ();
+            flake.baseX = spawn.x;
+            flake.baseZ = spawn.z;
+        }
+        flake.fade = Math.min(1, flake.fade + fadeStep);
+        const fallen = 1 - (flake.y - RAIN_FLOOR_Y) / span;
+        const landFade = fallen > 0.85 ? Math.max(0, (1 - fallen) / 0.15) : 1;
+        // seitliches Taumeln, am Formrand abgeklemmt, damit keine Flocke über
+        // die Grundform hinausdriftet
+        let dx = Math.sin(snowTime * flake.drift + flake.phase) * SNOW_DRIFT;
+        let dz = Math.cos(snowTime * flake.drift * 0.7 + flake.phase) * SNOW_DRIFT;
+        if (!snowInsideShape(flake.baseX + dx, flake.baseZ + dz)) {
+            dx = 0;
+            dz = 0;
+        }
+        const o = i * 3;
+        positions[o] = flake.baseX + dx;
+        positions[o + 1] = flake.y;
+        positions[o + 2] = flake.baseZ + dz;
+        opacities[i] = maxOpacity * flake.maxOpacity * flake.fade * landFade;
+    }
+    snowGeometry.attributes.position.needsUpdate = true;
+    snowGeometry.attributes.aOpacity.needsUpdate = true;
+}
+
 // Schnittstelle: Marker/Wege ein-/ausblenden, Wolken steuern
 const overlayObjects = new Map();
 const terrainViewer = {
@@ -1074,6 +1232,15 @@ const terrainViewer = {
         return { ...fogConfig };
     },
     getFog: () => ({ ...fogConfig }),
+    setSnow(options = {}) {
+        const value = typeof options === 'number' ? options : options.snow;
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            snowConfig.snow = Math.min(100, Math.max(0, value));
+            // Deckkraft folgt über den Fade in animateSnow — hier nichts setzen
+        }
+        return { ...snowConfig };
+    },
+    getSnow: () => ({ ...snowConfig }),
 };
 window.terrainViewer = terrainViewer;
 
@@ -1184,6 +1351,8 @@ window.addEventListener('message', (event) => {
         terrainViewer.setClouds(data);
     } else if (data.type === 'fog') {
         terrainViewer.setFog(data);
+    } else if (data.type === 'snow') {
+        terrainViewer.setSnow(data);
     }
 });
 
@@ -1328,6 +1497,7 @@ renderer.setAnimationLoop(() => {
     animateClouds(delta);
     animateLightning(delta);
     animateFog(delta);
+    animateSnow(delta);
     // Kamera nie unter die 0-Ebene (Modellboden), egal welches Neigungslimit
     // gilt: camera.y = target.y + r*cos(phi) >= 0, abhängig von Ziel und Zoom
     const r = camera.position.distanceTo(controls.target) || 1;
