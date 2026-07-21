@@ -470,6 +470,7 @@ if (CONFIG.groundVisible) {
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
+controls.enablePan = false; // kein Verschieben (Maus + Zwei-Finger) — das Modell bleibt zentriert
 controls.autoRotate = true;
 controls.autoRotateSpeed = 1.0;
 canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; }, { once: true });

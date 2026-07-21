@@ -505,6 +505,7 @@ export class TerrainViewer {
         this.controls?.dispose();
         this.controls = new OrbitControls(camera, this.renderer.domElement);
         this.controls.enableDamping = true;
+        this.controls.enablePan = false; // kein Verschieben (Maus + Zwei-Finger) — das Modell bleibt zentriert
         if (camera.isOrthographicCamera) {
             this.controls.minZoom = 0.3;
             this.controls.maxZoom = 10;
