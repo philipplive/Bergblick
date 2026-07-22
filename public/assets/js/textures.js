@@ -85,6 +85,54 @@ export function makeRockTexture() {
     return ctx.canvas;
 }
 
+/**
+ * Leitet aus der Helligkeit einer Farbtextur eine kachelbare Tangent-Space-
+ * Normal-Map ab (Sobel-Gradient als Pseudo-Höhenfeld). Damit bekommt der
+ * matte Sockel spürbar Struktur, ohne dass zusätzliche Geometrie nötig wäre.
+ * `strength` skaliert die Reliefwirkung (grösser = ausgeprägtere Dellen).
+ */
+export function makeNormalMap(sourceCanvas, strength = 2.0) {
+    const w = sourceCanvas.width;
+    const h = sourceCanvas.height;
+    const src = sourceCanvas.getContext('2d').getImageData(0, 0, w, h).data;
+
+    // Graustufen-Höhe pro Pixel (Rec. 601 Luma)
+    const height = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+        height[i] = (0.299 * src[i * 4] + 0.587 * src[i * 4 + 1] + 0.114 * src[i * 4 + 2]) / 255;
+    }
+    // Toroidaler Zugriff hält die Normal-Map an den Rändern kachelbar
+    const at = (x, y) => height[((y + h) % h) * w + ((x + w) % w)];
+
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const dst = out.getContext('2d').createImageData(w, h);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            // Sobel-Gradient in X und Y
+            const dx = (at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1))
+                - (at(x - 1, y - 1) + 2 * at(x - 1, y) + at(x - 1, y + 1));
+            const dy = (at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1))
+                - (at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1));
+            // Normale = normalize(-dx*strength, -dy*strength, 1), in 0..255 kodiert
+            let nx = -dx * strength;
+            let ny = -dy * strength;
+            const nz = 1;
+            const len = Math.hypot(nx, ny, nz) || 1;
+            nx /= len;
+            ny /= len;
+            const o = (y * w + x) * 4;
+            dst.data[o] = (nx * 0.5 + 0.5) * 255;
+            dst.data[o + 1] = (ny * 0.5 + 0.5) * 255;
+            dst.data[o + 2] = (nz / len * 0.5 + 0.5) * 255;
+            dst.data[o + 3] = 255;
+        }
+    }
+    out.getContext('2d').putImageData(dst, 0, 0);
+    return out;
+}
+
 /** Gesteinsschichten: horizontale Bänder wie Sedimentschichten. */
 export function makeStrataTexture() {
     const ctx = createContext('#ada395');

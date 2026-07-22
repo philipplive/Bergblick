@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makeSoilTexture, makeRockTexture, makeStrataTexture } from './textures.js';
+import { makeSoilTexture, makeRockTexture, makeStrataTexture, makeNormalMap } from './textures.js';
 import { insideShape, sampleHeight } from './mesh.js';
 
 const WORLD_WIDTH = 100;   // Modellbreite in Szenen-Einheiten
@@ -12,6 +12,9 @@ const SUN_DISTANCE = 160;  // fester Abstand der Lichtquelle vom Mittelpunkt
 // Schlagschatten die Lichtstimmung dominieren; über den Regler einstellbar
 // (options.envIntensity in Prozent, 100 % = Faktor 1.0).
 const ENV_INTENSITY_DEFAULT = 35;
+// Stärke der prozeduralen Sockel-Normal-Map: dezent, damit die Struktur
+// greifbar wird, ohne dass der Sockel "verbeult" wirkt.
+const SKIRT_NORMAL_SCALE = 0.6;
 
 /**
  * Ersatz für den PCF-Zweig im Shadow-Shader von Three.js: Poisson-Disk mit
@@ -387,8 +390,10 @@ export class TerrainViewer {
         // Kanten kommen weiterhin über shadow.radius.
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
-        // Filmisches Tone Mapping: weicher Highlight-Verlauf statt hartem Clipping
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        // AgX Tone Mapping: natürlichere Farbwiedergabe als ACES (weniger
+        // Sättigungsverschiebung in Grüntönen), saubere Highlights bei Himmel
+        // und Schnee ohne hartes Clipping
+        this.renderer.toneMapping = THREE.AgXToneMapping;
         this.renderer.toneMappingExposure = this.options.exposure / 100;
         container.appendChild(this.renderer.domElement);
 
@@ -794,12 +799,17 @@ export class TerrainViewer {
         this.modelGroup.add(this.terrainMesh);
         this.applyAOColors();
 
+        const baseMaps = this.baseMaps(this.options.baseStyle);
         this.skirtMesh = new THREE.Mesh(
             new THREE.BufferGeometry(),
             new THREE.MeshStandardMaterial({
                 color: this.options.baseColor,
-                map: this.baseTexture(this.options.baseStyle),
-                roughness: 1,
+                map: baseMaps.map,
+                normalMap: baseMaps.normalMap,
+                normalScale: new THREE.Vector2(SKIRT_NORMAL_SCALE, SKIRT_NORMAL_SCALE),
+                // leicht unter 1: die Normal-Map soll Struktur zeigen können,
+                // statt in vollständig mattem Grau zu verschwinden
+                roughness: 0.85,
                 side: THREE.DoubleSide,
             })
         );
@@ -1766,17 +1776,22 @@ export class TerrainViewer {
      * Web-Export als separate Dateien und werden zur Laufzeit angehängt.
      */
     exportGLB() {
+        // Farb- und Normal-Map werden separat exportiert bzw. im Web-Viewer
+        // prozedural neu erzeugt; sie werden hier temporär entfernt, damit der
+        // GLTFExporter sie nicht als (grosse) Bilder ins GLB einbettet.
         const stripped = [];
         for (const mesh of [this.terrainMesh, this.skirtMesh]) {
-            if (mesh?.material.map) {
-                stripped.push([mesh.material, mesh.material.map]);
+            if (mesh?.material.map || mesh?.material.normalMap) {
+                stripped.push([mesh.material, mesh.material.map, mesh.material.normalMap]);
                 mesh.material.map = null;
+                mesh.material.normalMap = null;
                 mesh.material.needsUpdate = true;
             }
         }
         const restore = () => {
-            for (const [material, map] of stripped) {
+            for (const [material, map, normalMap] of stripped) {
                 material.map = map;
+                material.normalMap = normalMap;
                 material.needsUpdate = true;
             }
         };
@@ -1786,19 +1801,34 @@ export class TerrainViewer {
     }
 
     /** Prozedurale Sockel-Textur (gecached); null bei Stil "Einfarbig". */
-    baseTexture(style) {
-        if (style === 'color') return null;
+    /**
+     * Baut die Sockel-Texturen eines Stils (Farb- und Normal-Map) und legt sie
+     * im Cache ab. Die Normal-Map wird prozedural aus der Farbtextur abgeleitet
+     * (siehe makeNormalMap), sodass die Struktur mit Licht spielt, ohne dass
+     * zusätzliche Geometrie oder Assets nötig sind.
+     */
+    baseMaps(style) {
+        if (style === 'color') return { map: null, normalMap: null };
         this.baseTextureCache = this.baseTextureCache ?? {};
         if (!this.baseTextureCache[style]) {
             const makers = { soil: makeSoilTexture, rock: makeRockTexture, strata: makeStrataTexture };
-            if (!makers[style]) return null;
-            const texture = new THREE.CanvasTexture(makers[style]());
-            texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.RepeatWrapping;
-            texture.colorSpace = THREE.SRGBColorSpace;
-            this.baseTextureCache[style] = texture;
+            if (!makers[style]) return { map: null, normalMap: null };
+            const colorCanvas = makers[style]();
+            const map = new THREE.CanvasTexture(colorCanvas);
+            const normalMap = new THREE.CanvasTexture(makeNormalMap(colorCanvas));
+            for (const tex of [map, normalMap]) {
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+            }
+            map.colorSpace = THREE.SRGBColorSpace;
+            // Normal-Maps sind lineare Daten, nicht sRGB
+            this.baseTextureCache[style] = { map, normalMap };
         }
         return this.baseTextureCache[style];
+    }
+
+    baseTexture(style) {
+        return this.baseMaps(style).map;
     }
 
     /**
@@ -2039,7 +2069,9 @@ export class TerrainViewer {
     setBaseStyle(style) {
         this.options.baseStyle = style;
         if (this.skirtMesh) {
-            this.skirtMesh.material.map = this.baseTexture(style);
+            const maps = this.baseMaps(style);
+            this.skirtMesh.material.map = maps.map;
+            this.skirtMesh.material.normalMap = maps.normalMap;
             this.skirtMesh.material.needsUpdate = true;
             this.rebuildSkirt(); // Stil bestimmt auch die Reliefstruktur der Wände
         }
