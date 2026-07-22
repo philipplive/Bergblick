@@ -363,8 +363,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true 
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // vereinigt überlappende Schatten korrekt
-// AgX Tone Mapping wie im Editor (Belichtung aus der Konfiguration)
-renderer.toneMapping = THREE.AgXToneMapping;
+// Filmisches Tone Mapping wie im Editor (Belichtung aus der Konfiguration)
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = CONFIG.exposure ?? 1;
 
 const scene = new THREE.Scene();

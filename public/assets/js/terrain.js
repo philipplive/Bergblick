@@ -390,10 +390,8 @@ export class TerrainViewer {
         // Kanten kommen weiterhin über shadow.radius.
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
-        // AgX Tone Mapping: natürlichere Farbwiedergabe als ACES (weniger
-        // Sättigungsverschiebung in Grüntönen), saubere Highlights bei Himmel
-        // und Schnee ohne hartes Clipping
-        this.renderer.toneMapping = THREE.AgXToneMapping;
+        // Filmisches Tone Mapping: weicher Highlight-Verlauf statt hartem Clipping
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = this.options.exposure / 100;
         container.appendChild(this.renderer.domElement);
 
