@@ -2,22 +2,36 @@
     box-sizing: border-box;
 }
 
+/* Material Design 3 – dunkles Farbschema (Baseline-Palette) */
 :root {
-    --bg: #1c1f26;
-    --panel: #262a33;
-    --panel-border: #343a46;
-    --text: #e8eaf0;
-    --muted: #9aa1af;
-    --accent: #4f8ef7;
-    --accent-hover: #3c7ce4;
+    --md-primary: #d0bcff;
+    --md-on-primary: #381e72;
+    --md-primary-container: #4f378b;
+    --md-on-primary-container: #eaddff;
+    --md-secondary-container: #4a4458;
+    --md-on-secondary-container: #e8def8;
+    --md-surface: #141218;
+    --md-surface-container-low: #1d1b20;
+    --md-surface-container: #211f26;
+    --md-surface-container-high: #2b2930;
+    --md-surface-container-highest: #36343b;
+    --md-on-surface: #e6e0e9;
+    --md-on-surface-variant: #cac4d0;
+    --md-outline: #938f99;
+    --md-outline-variant: #49454f;
+    --md-error: #f2b8b5;
+
+    /* Aliase für Karten-Overlays (Leaflet-Handles) */
+    --accent: var(--md-primary);
 }
 
 html, body {
     margin: 0;
     height: 100%;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
+    font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--md-surface);
+    color: var(--md-on-surface);
+    accent-color: var(--md-primary);
 }
 
 #layout {
@@ -26,50 +40,75 @@ html, body {
 }
 
 #sidebar {
-    width: 320px;
+    width: 340px;
     flex-shrink: 0;
-    padding: 16px;
+    padding: 16px 12px;
     overflow-y: auto;
-    background: var(--bg);
-    border-right: 1px solid var(--panel-border);
+    background: var(--md-surface);
     display: flex;
     flex-direction: column;
     gap: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--md-outline-variant) transparent;
 }
 
-#sidebar h1 {
-    font-size: 20px;
-    margin: 0 0 4px;
+#sidebar::-webkit-scrollbar {
+    width: 8px;
 }
+
+#sidebar::-webkit-scrollbar-thumb {
+    background: var(--md-outline-variant);
+    border-radius: 4px;
+}
+
+/* ---------- Top-App-Bar ---------- */
 
 #app-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    padding: 4px 4px 8px;
+}
+
+#sidebar h1 {
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: 0;
+    margin: 0;
 }
 
 #app-menu {
     position: relative;
 }
 
+/* Icon-Button (rund, mit State-Layer) */
 #btn-menu {
-    padding: 4px 10px;
-    font-size: 16px;
-    line-height: 1.4;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--md-on-surface-variant);
+    font-size: 18px;
+    line-height: 1;
+}
+
+#btn-menu:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--md-on-surface-variant) 10%, transparent);
+    filter: none;
 }
 
 #app-menu-dropdown {
     position: absolute;
     right: 0;
     top: calc(100% + 6px);
-    min-width: 190px;
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 8px;
-    padding: 6px;
+    min-width: 200px;
+    background: var(--md-surface-container-high);
+    border-radius: 12px;
+    padding: 8px;
     z-index: 1200;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 .menu-item {
@@ -78,44 +117,53 @@ html, body {
     text-align: left;
     background: none;
     border: 0;
-    color: var(--text);
+    color: var(--md-on-surface);
     font: inherit;
-    font-size: 13px;
-    padding: 8px 10px;
-    border-radius: 6px;
+    font-size: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
     cursor: pointer;
 }
 
 .menu-item:hover {
-    background: var(--panel-border);
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
 }
 
+/* ---------- Karten (Panels) ---------- */
+
 .panel {
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 10px;
-    padding: 14px;
+    background: var(--md-surface-container);
+    border-radius: 20px;
+    padding: 16px;
 }
 
 .panel h2 {
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    color: var(--md-primary);
+    margin: 0 0 12px;
 }
+
+/* ---------- Formularfelder ---------- */
 
 .field {
     display: block;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     font-size: 13px;
 }
 
 .field span {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 4px;
-    color: var(--muted);
+    margin-bottom: 6px;
+    color: var(--md-on-surface-variant);
+}
+
+.field output {
+    color: var(--md-on-surface);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
 }
 
 .field select,
@@ -126,13 +174,142 @@ html, body {
 .field select,
 .field input[type="text"] {
     width: 100%;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--panel-border);
-    border-radius: 6px;
-    padding: 7px 8px;
-    font-size: 13px;
+    background: var(--md-surface-container-highest);
+    color: var(--md-on-surface);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: 14px;
 }
+
+.field select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23cac4d0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    cursor: pointer;
+}
+
+.field select:focus,
+.field input[type="text"]:focus {
+    outline: none;
+    border-color: var(--md-primary);
+    box-shadow: 0 0 0 1px var(--md-primary);
+}
+
+/* ---------- Slider (M3 Expressive) ---------- */
+
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 28px;
+    margin: 2px 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+    height: 16px;
+    border-radius: 8px;
+    background: linear-gradient(
+        to right,
+        var(--md-primary) 0 calc(var(--p, 50) * 1%),
+        var(--md-surface-container-highest) calc(var(--p, 50) * 1%) 100%
+    );
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 5px;
+    height: 28px;
+    margin-top: -6px;
+    border-radius: 3px;
+    background: var(--md-primary);
+    box-shadow: 0 0 0 4px var(--md-surface-container);
+}
+
+input[type="range"]::-moz-range-track {
+    height: 16px;
+    border-radius: 8px;
+    background: var(--md-surface-container-highest);
+}
+
+input[type="range"]::-moz-range-progress {
+    height: 16px;
+    border-radius: 8px;
+    background: var(--md-primary);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 5px;
+    height: 28px;
+    border: none;
+    border-radius: 3px;
+    background: var(--md-primary);
+    box-shadow: 0 0 0 4px var(--md-surface-container);
+}
+
+/* ---------- Switch statt Checkbox ---------- */
+
+.field.check {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    min-height: 36px;
+}
+
+.field.check span {
+    display: inline;
+    margin: 0;
+    color: var(--md-on-surface);
+}
+
+.field.check input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    flex-shrink: 0;
+    width: 52px;
+    height: 32px;
+    margin: 0;
+    border-radius: 16px;
+    border: 2px solid var(--md-outline);
+    background: var(--md-surface-container-highest);
+    position: relative;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.field.check input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--md-outline);
+    transform: translateY(-50%);
+    transition: left 0.15s ease, width 0.15s ease, height 0.15s ease, background 0.15s ease;
+}
+
+.field.check input[type="checkbox"]:checked {
+    background: var(--md-primary);
+    border-color: var(--md-primary);
+}
+
+.field.check input[type="checkbox"]:checked::before {
+    left: 22px;
+    width: 24px;
+    height: 24px;
+    background: var(--md-on-primary);
+}
+
+/* ---------- Datei-Eingabe ---------- */
 
 .file-row {
     display: flex;
@@ -144,13 +321,404 @@ html, body {
     flex: 1;
     min-width: 0;
     font-size: 11px;
-    color: var(--muted);
+    color: var(--md-on-surface-variant);
+}
+
+input[type="file"]::file-selector-button {
+    background: var(--md-secondary-container);
+    color: var(--md-on-secondary-container);
+    border: none;
+    border-radius: 999px;
+    padding: 6px 12px;
+    margin-right: 8px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
 }
 
 .file-row .btn {
     flex: 0 0 auto;
-    padding: 5px 9px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
 }
+
+/* ---------- Buttons (M3: Filled / Tonal) ---------- */
+
+.btn {
+    display: inline-block;
+    background: var(--md-secondary-container);
+    color: var(--md-on-secondary-container);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 16px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    cursor: pointer;
+    transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--md-on-secondary-container) 8%, var(--md-secondary-container));
+}
+
+.btn:active:not(:disabled) {
+    background: color-mix(in srgb, var(--md-on-secondary-container) 14%, var(--md-secondary-container));
+}
+
+.btn:disabled {
+    background: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+    color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+    cursor: not-allowed;
+}
+
+.btn:focus-visible,
+.tab:focus-visible,
+.menu-item:focus-visible {
+    outline: 2px solid var(--md-primary);
+    outline-offset: 2px;
+}
+
+.btn.primary {
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+    width: 100%;
+}
+
+.btn.primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--md-on-primary) 8%, var(--md-primary));
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.btn.big {
+    padding: 16px;
+    font-size: 15px;
+    font-weight: 500;
+    border-radius: 999px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.btn.active {
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+}
+
+.btn.primary:disabled,
+.btn.active:disabled,
+.btn.big:disabled {
+    background: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+    color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+    box-shadow: none;
+}
+
+#btn-import {
+    width: 100%;
+    margin-top: 4px;
+}
+
+/* ---------- Segmented Buttons (Formwahl) ---------- */
+
+.shape-group {
+    display: flex;
+    margin-bottom: 12px;
+}
+
+.btn.shape {
+    flex: 1;
+    padding: 9px 4px;
+    font-size: 12.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    background: transparent;
+    color: var(--md-on-surface);
+    border: 1px solid var(--md-outline);
+    border-radius: 0;
+}
+
+.btn.shape + .btn.shape {
+    margin-left: -1px;
+}
+
+.btn.shape:first-child {
+    border-radius: 999px 0 0 999px;
+}
+
+.btn.shape:last-child {
+    border-radius: 0 999px 999px 0;
+}
+
+.btn.shape:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+.btn.shape.active {
+    background: var(--md-secondary-container);
+    color: var(--md-on-secondary-container);
+    border-color: var(--md-outline);
+}
+
+.btn-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.btn-row .btn {
+    flex: 1 1 auto;
+}
+
+/* ---------- Farbwahl ---------- */
+
+.color-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.color-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--md-on-surface-variant);
+}
+
+.color-field input[type="color"] {
+    width: 100%;
+    height: 36px;
+    padding: 4px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 999px;
+    background: var(--md-surface-container-highest);
+    cursor: pointer;
+}
+
+.color-field input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.color-field input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 999px;
+}
+
+.color-field input[type="color"]::-moz-color-swatch {
+    border: none;
+    border-radius: 999px;
+}
+
+/* ---------- Overlay-Liste ---------- */
+
+.overlay-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.overlay-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--md-surface-container-high);
+    border-radius: 12px;
+    padding: 7px 10px;
+    font-size: 12.5px;
+}
+
+.overlay-list .dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: none;
+    padding: 0;
+    background: none;
+    cursor: pointer;
+}
+
+/* Farbpunkt ist ein <input type="color">: Swatch rund und randlos */
+.overlay-list input.dot::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.overlay-list input.dot::-webkit-color-swatch {
+    border: none;
+    border-radius: 50%;
+}
+
+.overlay-list input.dot::-moz-color-swatch {
+    border: none;
+    border-radius: 50%;
+}
+
+.overlay-list .name {
+    flex: 1;
+}
+
+/* Tafel-Text direkt in der Zeile editierbar */
+.overlay-list .name-input {
+    min-width: 0;
+    background: none;
+    border: none;
+    border-bottom: 1px dashed transparent;
+    color: var(--md-on-surface);
+    font: inherit;
+    font-size: 12.5px;
+    padding: 0;
+}
+
+.overlay-list .name-input:hover {
+    border-bottom-color: var(--md-on-surface-variant);
+}
+
+.overlay-list .name-input:focus {
+    outline: none;
+    border-bottom-color: var(--md-primary);
+}
+
+/* Linientyp eines Wegs direkt in der Zeile wählbar */
+.overlay-list select.line-type {
+    flex-shrink: 0;
+    background: var(--md-surface-container-highest);
+    color: var(--md-on-surface-variant);
+    border: none;
+    border-radius: 8px;
+    padding: 3px 6px;
+    font-size: 11.5px;
+    cursor: pointer;
+}
+
+.overlay-list select.line-type:hover {
+    color: var(--md-on-surface);
+}
+
+.overlay-list .del {
+    background: none;
+    border: none;
+    color: var(--md-on-surface-variant);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+    border-radius: 50%;
+}
+
+.overlay-list .del:hover {
+    color: var(--md-error);
+}
+
+/* ---------- Hinweise & Fusszeile ---------- */
+
+.muted {
+    color: var(--md-on-surface-variant);
+    font-size: 12.5px;
+    line-height: 1.5;
+    margin: 8px 0 0;
+    min-height: 1em;
+}
+
+footer {
+    margin-top: auto;
+    padding: 0 4px;
+    font-size: 11px;
+    color: var(--md-on-surface-variant);
+    line-height: 1.6;
+}
+
+footer a {
+    color: var(--md-on-surface-variant);
+}
+
+/* ---------- Hauptbereich & Tabs ---------- */
+
+#main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+#view-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    background: var(--md-surface);
+    border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.tab {
+    background: transparent;
+    color: var(--md-on-surface-variant);
+    border: none;
+    border-radius: 999px;
+    padding: 9px 18px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+}
+
+.tab:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+.tab.active {
+    background: var(--md-secondary-container);
+    color: var(--md-on-secondary-container);
+}
+
+.tab:disabled {
+    color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+    cursor: not-allowed;
+}
+
+#btn-save-view {
+    margin-left: auto;
+}
+
+#btn-iso.active {
+    background: var(--md-primary);
+    color: var(--md-on-primary);
+}
+
+.view {
+    flex: 1;
+    display: none;
+    min-height: 0;
+}
+
+.view.active {
+    display: block;
+}
+
+#map.selecting {
+    cursor: crosshair;
+}
+
+#viewer {
+    position: relative;
+    background: linear-gradient(#22293a, #10131a);
+}
+
+#viewer.transparent-bg {
+    background: repeating-conic-gradient(#2e3440 0% 25%, #3b4252 0% 50%) 0 0 / 24px 24px;
+}
+
+#viewer canvas {
+    display: block;
+}
+
+/* ---------- Karten-Overlays (Leaflet) ---------- */
 
 .label-icon {
     background: none;
@@ -214,306 +782,7 @@ html, body {
     margin: 0 auto;
 }
 
-.btn {
-    display: inline-block;
-    background: var(--panel-border);
-    color: var(--text);
-    border: none;
-    border-radius: 8px;
-    padding: 9px 12px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.btn:hover:not(:disabled) {
-    filter: brightness(1.15);
-}
-
-.btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-}
-
-.btn.primary {
-    background: var(--accent);
-    color: #fff;
-    width: 100%;
-}
-
-#btn-import {
-    width: 100%;
-    margin-top: 4px;
-}
-
-.btn.primary:hover:not(:disabled) {
-    background: var(--accent-hover);
-    filter: none;
-}
-
-.btn.big {
-    padding: 12px;
-    font-size: 15px;
-    font-weight: 600;
-}
-
-.btn.active {
-    outline: 2px solid var(--accent);
-}
-
-.color-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 10px;
-}
-
-.color-field {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 12px;
-    color: var(--muted);
-}
-
-.color-field input[type="color"] {
-    width: 100%;
-    height: 30px;
-    padding: 2px;
-    border: 1px solid var(--panel-border);
-    border-radius: 6px;
-    background: var(--bg);
-    cursor: pointer;
-}
-
 .pin-icon {
     background: none;
     border: none;
-}
-
-.overlay-list {
-    list-style: none;
-    margin: 0 0 10px;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.overlay-list li {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--bg);
-    border: 1px solid var(--panel-border);
-    border-radius: 6px;
-    padding: 5px 8px;
-    font-size: 12.5px;
-}
-
-.overlay-list .dot {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    border: none;
-    padding: 0;
-    background: none;
-    cursor: pointer;
-}
-
-/* Farbpunkt ist ein <input type="color">: Swatch rund und randlos */
-.overlay-list input.dot::-webkit-color-swatch-wrapper {
-    padding: 0;
-}
-
-.overlay-list input.dot::-webkit-color-swatch {
-    border: none;
-    border-radius: 50%;
-}
-
-.overlay-list input.dot::-moz-color-swatch {
-    border: none;
-    border-radius: 50%;
-}
-
-.overlay-list .name {
-    flex: 1;
-}
-
-/* Tafel-Text direkt in der Zeile editierbar */
-.overlay-list .name-input {
-    min-width: 0;
-    background: none;
-    border: none;
-    border-bottom: 1px dashed transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: 12.5px;
-    padding: 0;
-}
-
-.overlay-list .name-input:hover {
-    border-bottom-color: var(--muted);
-}
-
-.overlay-list .name-input:focus {
-    outline: none;
-    border-bottom-color: var(--accent);
-}
-
-/* Linientyp eines Wegs direkt in der Zeile wählbar */
-.overlay-list select.line-type {
-    flex-shrink: 0;
-    background: var(--bg);
-    color: var(--muted);
-    border: 1px solid var(--panel-border);
-    border-radius: 5px;
-    padding: 2px 4px;
-    font-size: 11.5px;
-    cursor: pointer;
-}
-
-.overlay-list select.line-type:hover {
-    color: var(--text);
-}
-
-.overlay-list .del {
-    background: none;
-    border: none;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 13px;
-    padding: 2px 4px;
-}
-
-.overlay-list .del:hover {
-    color: #e5484d;
-}
-
-.field.check {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.field.check span {
-    display: inline;
-    margin: 0;
-}
-
-.shape-group {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 10px;
-}
-
-.btn.shape {
-    flex: 1;
-    padding: 7px 4px;
-    font-size: 12px;
-    white-space: nowrap;
-}
-
-.btn.shape.active {
-    background: var(--accent);
-    color: #fff;
-}
-
-.btn-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.btn-row .btn {
-    flex: 1 1 auto;
-}
-
-.muted {
-    color: var(--muted);
-    font-size: 12.5px;
-    margin: 8px 0 0;
-    min-height: 1em;
-}
-
-footer {
-    margin-top: auto;
-    font-size: 11px;
-    color: var(--muted);
-    line-height: 1.6;
-}
-
-footer a {
-    color: var(--muted);
-}
-
-#main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-}
-
-#view-tabs {
-    display: flex;
-    gap: 4px;
-    padding: 8px 12px;
-    background: var(--bg);
-    border-bottom: 1px solid var(--panel-border);
-}
-
-.tab {
-    background: transparent;
-    color: var(--muted);
-    border: none;
-    border-radius: 6px;
-    padding: 7px 16px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.tab.active {
-    background: var(--panel);
-    color: var(--text);
-}
-
-.tab:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-#btn-save-view {
-    margin-left: auto;
-}
-
-#btn-iso.active {
-    background: var(--accent);
-    color: #fff;
-}
-
-.view {
-    flex: 1;
-    display: none;
-    min-height: 0;
-}
-
-.view.active {
-    display: block;
-}
-
-#map.selecting {
-    cursor: crosshair;
-}
-
-#viewer {
-    position: relative;
-    background: linear-gradient(#22293a, #10131a);
-}
-
-#viewer.transparent-bg {
-    background: repeating-conic-gradient(#2e3440 0% 25%, #3b4252 0% 50%) 0 0 / 24px 24px;
-}
-
-#viewer canvas {
-    display: block;
 }

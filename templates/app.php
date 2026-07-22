@@ -13,8 +13,12 @@ declare(strict_types=1);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#141218">
     <title><?= htmlspecialchars($appName) ?></title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🏔️</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
     <link rel="stylesheet" href="assets/css/app.css">
@@ -292,6 +296,21 @@ declare(strict_types=1);
         <div id="viewer" class="view"></div>
     </main>
 </div>
+<script>
+// Füllstand der Material-Slider: setzt --p (Prozent) für den gefüllten Track-Anteil.
+(() => {
+    const update = (el) => {
+        const min = parseFloat(el.min || '0');
+        const max = parseFloat(el.max || '100');
+        const p = max > min ? ((parseFloat(el.value) - min) / (max - min)) * 100 : 0;
+        el.style.setProperty('--p', String(p));
+    };
+    document.addEventListener('input', (e) => {
+        if (e.target.matches?.('input[type="range"]')) update(e.target);
+    });
+    document.querySelectorAll('input[type="range"]').forEach(update);
+})();
+</script>
 <script type="module" src="assets/js/app.js"></script>
 </body>
 </html>
