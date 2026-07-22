@@ -1,11 +1,17 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { makeSoilTexture, makeRockTexture, makeStrataTexture } from './textures.js';
 import { insideShape, sampleHeight } from './mesh.js';
 
 const WORLD_WIDTH = 100;   // Modellbreite in Szenen-Einheiten
 const SUN_DISTANCE = 160;  // fester Abstand der Lichtquelle vom Mittelpunkt
+// Environment-Map liefert die PBR-Materialien mit weicher indirekter Beleuchtung
+// (statt nur Hemisphere-Licht). Standardmässig niedrig, damit Sonne und
+// Schlagschatten die Lichtstimmung dominieren; über den Regler einstellbar
+// (options.envIntensity in Prozent, 100 % = Faktor 1.0).
+const ENV_INTENSITY_DEFAULT = 35;
 
 /**
  * Ersatz für den PCF-Zweig im Shadow-Shader von Three.js: Poisson-Disk mit
@@ -360,6 +366,7 @@ export class TerrainViewer {
             fogSize: 100,      // Grösse der Nebelschwaden in Prozent
             snow: 0,           // Schneefall-Stärke in Prozent (0 = kein Schnee)
             snowSize: 100,     // Grösse der Schneeflocken in Prozent
+            envIntensity: ENV_INTENSITY_DEFAULT, // Umgebungslicht (Environment-Map) in Prozent
         };
 
         this.scene = new THREE.Scene();
@@ -384,6 +391,14 @@ export class TerrainViewer {
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = this.options.exposure / 100;
         container.appendChild(this.renderer.domElement);
+
+        // Vorberechnete Environment-Map: gibt allen MeshStandardMaterial-Objekten
+        // (Gelände, Sockel, Marker, Wege) indirekte Beleuchtung. Einmalig erzeugt,
+        // danach ist der PMREMGenerator entbehrlich.
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+        this.scene.environmentIntensity = this.options.envIntensity / 100;
+        pmrem.dispose();
 
         this.attachControls(this.camera);
 
@@ -1999,6 +2014,11 @@ export class TerrainViewer {
     setExposure(percent) {
         this.options.exposure = percent;
         this.renderer.toneMappingExposure = percent / 100;
+    }
+
+    setEnvIntensity(percent) {
+        this.options.envIntensity = percent;
+        this.scene.environmentIntensity = percent / 100;
     }
 
     setExaggeration(value) {

@@ -173,6 +173,10 @@ declare(strict_types=1);
                 <span>Belichtung <output id="out-exposure">100 %</output></span>
                 <input type="range" id="opt-exposure" min="50" max="200" step="5" value="100">
             </label>
+            <label class="field">
+                <span>Umgebungslicht <output id="out-env">35 %</output></span>
+                <input type="range" id="opt-env" min="0" max="150" step="5" value="35">
+            </label>
             <label class="field check">
                 <input type="checkbox" id="opt-ground" checked>
                 <span>Untergrund anzeigen</span>

@@ -948,6 +948,11 @@ $('opt-exposure').addEventListener('input', (e) => {
     viewer.setExposure(Number(e.target.value));
 });
 
+$('opt-env').addEventListener('input', (e) => {
+    $('out-env').textContent = `${e.target.value} %`;
+    viewer.setEnvIntensity(Number(e.target.value));
+});
+
 $('opt-base-color').addEventListener('input', (e) => viewer.setBaseColor(e.target.value));
 $('opt-base-style').addEventListener('change', (e) => viewer.setBaseStyle(e.target.value));
 
@@ -1069,7 +1074,7 @@ const SETTING_IDS = [
     'opt-style', 'opt-resolution', 'opt-texture-size', 'opt-exaggeration', 'opt-ao',
     'opt-base', 'opt-ground-offset',
     'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
-    'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev', 'opt-exposure',
+    'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev', 'opt-exposure', 'opt-env',
     'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-color', 'opt-cloud-rain',
     'opt-lightning', 'opt-fog', 'opt-fog-size', 'opt-snow', 'opt-snow-size',
     'opt-model-width',
@@ -1121,6 +1126,7 @@ function collectViewerConfig() {
         shadowRadius: viewer.sun.shadow.radius,
         shadowIntensity: viewer.sun.shadow.intensity,
         exposure: Number($('opt-exposure').value) / 100,
+        envIntensity: Number($('opt-env').value) / 100,
         clouds: {
             count: Number($('opt-clouds').value),
             speed: Number($('opt-cloud-speed').value),

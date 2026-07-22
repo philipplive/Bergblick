@@ -294,6 +294,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // Weicher PCF-Schatten: Poisson-Disk-Kernel statt des stufigen Rasterkernels
 const PCF_BRANCH = ${JSON.stringify(PCF_POISSON_BRANCH)};
@@ -367,6 +368,13 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = CONFIG.exposure ?? 1;
 
 const scene = new THREE.Scene();
+// Environment-Map wie im Editor: weiche indirekte Beleuchtung für alle PBR-
+// Materialien. Intensität kommt aus der Konfiguration (Regler im Editor),
+// Fallback 0.35 für ältere Exporte ohne den Wert.
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = CONFIG.envIntensity ?? 0.35;
+pmrem.dispose();
 if (TRANSPARENT) {
     renderer.setClearAlpha(0); // Hintergrund bleibt durchsichtig (iframe!)
 } else {
