@@ -1047,6 +1047,11 @@ $('opt-snow').addEventListener('input', (e) => {
     viewer.setSnow(Number(e.target.value));
 });
 
+$('opt-snow-size').addEventListener('input', (e) => {
+    $('out-snow-size').textContent = `${e.target.value} %`;
+    viewer.setSnowSize(Number(e.target.value));
+});
+
 // Export-Sichtbegrenzungen (wirken nur im exportierten Viewer)
 $('opt-tilt-limit').addEventListener('input', (e) => {
     $('out-tilt-limit').textContent = `${e.target.value}°`;
@@ -1066,7 +1071,7 @@ const SETTING_IDS = [
     'opt-base-style', 'opt-base-relief', 'opt-base-color', 'opt-ground-color', 'opt-shadow-color',
     'opt-shadow-hardness', 'opt-shadow-strength', 'opt-light-rot', 'opt-light-elev', 'opt-exposure',
     'opt-clouds', 'opt-cloud-speed', 'opt-cloud-size', 'opt-cloud-opacity', 'opt-cloud-color', 'opt-cloud-rain',
-    'opt-lightning', 'opt-fog', 'opt-fog-size', 'opt-snow',
+    'opt-lightning', 'opt-fog', 'opt-fog-size', 'opt-snow', 'opt-snow-size',
     'opt-model-width',
     'opt-tilt-limit', 'opt-zoom-limit',
 ];
@@ -1131,6 +1136,7 @@ function collectViewerConfig() {
         fogDensity: Number($('opt-fog').value),
         fogSize: Number($('opt-fog-size').value),
         snow: Number($('opt-snow').value),
+        snowSize: Number($('opt-snow-size').value),
         fogShape: currentModel?.shape ?? 'rect',
         fogHeightField: viewer.getFogHeightField(),
         fogBaseY: viewer.fogBaseY(),

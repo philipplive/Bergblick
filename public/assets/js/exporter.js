@@ -232,13 +232,14 @@ export function buildWebViewerHTML() {
     karte.contentWindow.terrainViewer.setFog({ density: 60, size: 150 });
     karte.contentWindow.terrainViewer.getFog(); // { density, size }
 
-  Schneefall steuern (snow: 0–100):
+  Schneefall steuern (snow: 0–100, size: Flockengrösse in %):
     karte.contentWindow.postMessage({ type: 'snow', snow: 70 }, '*');
+    karte.contentWindow.postMessage({ type: 'snow', snow: 70, size: 150 }, '*');
     karte.contentWindow.postMessage({ type: 'snow', snow: 0 }, '*'); // Schnee aus
 
   Bei gleicher Herkunft auch direkt:
-    karte.contentWindow.terrainViewer.setSnow(70);      // oder { snow: 70 }
-    karte.contentWindow.terrainViewer.getSnow();        // { snow }
+    karte.contentWindow.terrainViewer.setSnow(70);      // oder { snow: 70, size: 150 }
+    karte.contentWindow.terrainViewer.getSnow();        // { snow, size }
 -->
 <html lang="de">
 <head>
@@ -512,12 +513,13 @@ const FOG_DRIFT_SPEED = 1.6;
 const WORLD_HALF_WIDTH = 50;  // Modell ist 100 Einheiten breit (wie im Editor)
 
 // --- Schnee ---
-const snowConfig = { snow: CONFIG.snow ?? 0 };
+const snowConfig = { snow: CONFIG.snow ?? 0, size: CONFIG.snowSize ?? 100 };
 const SNOW_MAX_FLAKES = 1400;
 const SNOW_FALL_SPEED = 3.5;
 const SNOW_DRIFT = 2.2;
 const SNOW_FADE_TIME = 2.5;   // Dauer für sanftes Ein-/Ausblenden (Sekunden)
 const SNOW_EDGE_INSET = 0.02; // Sicherheitsabstand zum Kartenrand (Anteil der halben Breite)
+const SNOW_BASE_SIZE = 1.1;   // Flockengrösse in Welteinheiten bei 100 %
 
 // Bewegungsraum der Schwaden: Modellgrundfläche minus Randabstand, damit auch
 // grosse Schwaden vollständig über dem Gelände bleiben
@@ -1046,7 +1048,7 @@ const SNOW_TOP_Y = CLOUD_BASE_Y + 8;
 const snowMaterial = new THREE.PointsMaterial({
     map: makeSnowTexture(),
     color: 0xffffff,
-    size: 1.1,
+    size: SNOW_BASE_SIZE * Math.max(0.1, snowConfig.size / 100),
     sizeAttenuation: true,
     transparent: true,
     opacity: 1,
@@ -1237,6 +1239,11 @@ const terrainViewer = {
         if (typeof value === 'number' && Number.isFinite(value)) {
             snowConfig.snow = Math.min(100, Math.max(0, value));
             // Deckkraft folgt über den Fade in animateSnow — hier nichts setzen
+        }
+        const size = typeof options === 'object' && options !== null ? options.size : undefined;
+        if (typeof size === 'number' && Number.isFinite(size)) {
+            snowConfig.size = Math.min(400, Math.max(10, size));
+            snowMaterial.size = SNOW_BASE_SIZE * (snowConfig.size / 100);
         }
         return { ...snowConfig };
     },

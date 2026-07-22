@@ -116,6 +116,7 @@ const SNOW_FALL_SPEED = 3.5;            // Fallgeschwindigkeit (Einheiten pro Se
 const SNOW_DRIFT = 2.2;                 // seitliches Taumeln der Flocken (Amplitude)
 const SNOW_FADE_TIME = 2.5;             // Dauer für sanftes Ein-/Ausblenden (Sekunden)
 const SNOW_EDGE_INSET = 0.02;           // Sicherheitsabstand zum Kartenrand (Anteil der halben Breite)
+const SNOW_BASE_SIZE = 1.1;             // Flockengrösse in Welteinheiten bei 100 %
 
 /** Weisses Textschild mit schwarzem Text und Rahmen für Ortstafeln. */
 export function makeLabelCanvas(text) {
@@ -358,6 +359,7 @@ export class TerrainViewer {
             fogDensity: 0,     // Dichte der Nebelschwaden in Prozent (0 = kein Nebel)
             fogSize: 100,      // Grösse der Nebelschwaden in Prozent
             snow: 0,           // Schneefall-Stärke in Prozent (0 = kein Schnee)
+            snowSize: 100,     // Grösse der Schneeflocken in Prozent
         };
 
         this.scene = new THREE.Scene();
@@ -521,7 +523,7 @@ export class TerrainViewer {
         this.snowMaterial = new THREE.PointsMaterial({
             map: new THREE.CanvasTexture(makeSnowTexture()),
             color: 0xffffff,
-            size: 1.1,
+            size: SNOW_BASE_SIZE * (this.options.snowSize / 100),
             sizeAttenuation: true,
             transparent: true,
             opacity: 1,
@@ -1491,6 +1493,11 @@ export class TerrainViewer {
     setSnow(percent) {
         this.options.snow = percent;
         // Deckkraft wird pro Flocke in animateSnow gesetzt (aOpacity); hier nichts tun
+    }
+
+    setSnowSize(percent) {
+        this.options.snowSize = percent;
+        this.snowMaterial.size = SNOW_BASE_SIZE * Math.max(0.1, percent / 100);
     }
 
     /** Wolken folgen der Geländehöhe (z. B. bei Überhöhungs-Änderung). */

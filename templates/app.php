@@ -234,6 +234,10 @@ declare(strict_types=1);
                 <span>Schneefall <output id="out-snow">0 %</output></span>
                 <input type="range" id="opt-snow" min="0" max="100" step="1" value="0">
             </label>
+            <label class="field">
+                <span>Schneeflocken-Grösse <output id="out-snow-size">100 %</output></span>
+                <input type="range" id="opt-snow-size" min="50" max="200" step="5" value="100">
+            </label>
         </section>
 
         <section class="panel">
