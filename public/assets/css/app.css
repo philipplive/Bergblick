@@ -651,7 +651,6 @@ footer a {
     gap: 6px;
     padding: 10px 12px;
     background: var(--md-surface);
-    border-bottom: 1px solid var(--md-outline-variant);
 }
 
 .tab {
@@ -699,6 +698,11 @@ footer a {
 
 .view.active {
     display: block;
+}
+
+#map {
+    border-top-left-radius: 16px;
+    overflow: hidden;
 }
 
 #map.selecting {
