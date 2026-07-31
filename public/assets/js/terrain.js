@@ -4,6 +4,7 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { makeSoilTexture, makeRockTexture, makeStrataTexture, makeNormalMap } from './textures.js';
 import { insideShape, sampleHeight } from './mesh.js';
+import { makeHighlightCanvas } from './ui/icons.js';
 
 const WORLD_WIDTH = 100;   // Modellbreite in Szenen-Einheiten
 const SUN_DISTANCE = 160;  // fester Abstand der Lichtquelle vom Mittelpunkt
@@ -157,6 +158,8 @@ export function makeLabelCanvas(text) {
 
 const LABEL_STICK_HEIGHT = 8;   // Stablänge der Ortstafeln (Szenen-Einheiten)
 const LABEL_PLATE_HEIGHT = 3.4; // Höhe des Textschilds
+const HIGHLIGHT_STICK_HEIGHT = 7;  // Stablänge der Highlights (Szenen-Einheiten)
+const HIGHLIGHT_DISC_SIZE = 5;     // Durchmesser der Icon-Scheibe
 const CONTACT_SHADOW_SIZE = 3.6; // Durchmesser der Kontaktschatten-Kreise
 const PATH_TUBE_RADIUS = 0.35;  // Dicke der Weg-Röhren
 const PATH_DASH_LENGTH = 1.7;   // Strichlänge gestrichelter Wege
@@ -457,7 +460,8 @@ export class TerrainViewer {
         this.overlayGroup = new THREE.Group();
         this.modelGroup.add(this.overlayGroup);
 
-        // { markers: [{id, color, u, v, h}], paths: [{id, color, lineType, runs}], labels: [{id, text, u, v, h}] }
+        // { markers: [{id, color, u, v, h}], paths: [{id, color, lineType, runs}],
+        //   labels: [{id, text, u, v, h}], highlights: [{id, color, icon, u, v, h}] }
         this.overlays = null;
         this.overlayGeometries = [];
         this.overlayMaterials = [];
@@ -469,8 +473,8 @@ export class TerrainViewer {
         // unbeleuchtet und ohne Tone Mapping: aus jedem Winkel rein weiss
         this.stickMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
 
-        // Ortstafeln separat: Sprites lassen sich nicht ins GLB exportieren,
-        // der Web-Export baut sie zur Laufzeit aus Konfigurationsdaten nach
+        // Ortstafeln und Highlights separat: Sprites lassen sich nicht ins GLB
+        // exportieren, der Web-Export baut sie zur Laufzeit aus Konfigurationsdaten nach
         this.labelGroup = new THREE.Group();
         this.scene.add(this.labelGroup);
 
@@ -1003,6 +1007,37 @@ export class TerrainViewer {
             group.add(stick, plate);
             this.labelGroup.add(group);
             addContactShadow(label);
+        }
+
+        // Highlights: Stab zum Boden + kamerazugewandte Icon-Scheibe in Wunschfarbe
+        for (const highlight of this.overlays.highlights ?? []) {
+            const group = new THREE.Group();
+            group.name = `highlight-${highlight.id}`;
+            const pos = worldPoint(highlight);
+
+            const stick = new THREE.Mesh(this.stickGeometry, this.stickMaterial);
+            stick.position.set(pos.x, pos.y + HIGHLIGHT_STICK_HEIGHT / 2, pos.z);
+            stick.scale.set(1, HIGHLIGHT_STICK_HEIGHT, 1);
+            stick.castShadow = true;
+
+            const canvas = makeHighlightCanvas(highlight.icon, highlight.color);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            this.overlayTextures.push(texture);
+            const material = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true,
+                depthWrite: false,
+                toneMapped: false, // Icon-Farbe bleibt exakt wie gewählt
+            });
+            this.overlayMaterials.push(material);
+            const disc = new THREE.Sprite(material);
+            disc.scale.set(HIGHLIGHT_DISC_SIZE, HIGHLIGHT_DISC_SIZE, 1);
+            disc.position.set(pos.x, pos.y + HIGHLIGHT_STICK_HEIGHT + HIGHLIGHT_DISC_SIZE / 2 - 0.2, pos.z);
+
+            group.add(stick, disc);
+            this.labelGroup.add(group);
+            addContactShadow(highlight);
         }
 
         for (const path of this.overlays.paths) {
@@ -2158,6 +2193,23 @@ export class TerrainViewer {
                 (label.u - 0.5) * WORLD_WIDTH,
                 (label.h - this.minHeight) * scale + base,
                 -((label.v - 0.5) * this.worldDepth),
+            ],
+        }));
+    }
+
+    /** Highlight-Daten (Name, Icon, Farbe, Weltposition) für den Web-Export. */
+    getHighlightPlacements() {
+        if (!this.model || !this.overlays?.highlights) return [];
+        const scale = this.worldScale * this.options.exaggeration;
+        const base = this.baseThickness() + this.groundOffsetY();
+        return this.overlays.highlights.map((highlight) => ({
+            name: `highlight-${highlight.id}`,
+            icon: highlight.icon,
+            color: highlight.color,
+            position: [
+                (highlight.u - 0.5) * WORLD_WIDTH,
+                (highlight.h - this.minHeight) * scale + base,
+                -((highlight.v - 0.5) * this.worldDepth),
             ],
         }));
     }

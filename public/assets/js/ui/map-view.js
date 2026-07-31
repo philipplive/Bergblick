@@ -25,8 +25,8 @@ export function makeHandle(latlng, kind) {
 
 /**
  * Kapselt die Leaflet-Karte und den aktiven Bearbeitungsmodus
- * (null | 'select' | 'marker' | 'path' | 'label'). Die Werkzeuge hängen sich
- * über onModeChange und die Maus-Ereignisse von `map` an.
+ * (null | 'select' | 'marker' | 'path' | 'label' | 'highlight'). Die Werkzeuge
+ * hängen sich über onModeChange und die Maus-Ereignisse von `map` an.
  */
 export class MapView {
     constructor() {
@@ -45,6 +45,7 @@ export class MapView {
             ['btn-marker', 'marker'],
             ['btn-path', 'path'],
             ['btn-label', 'label'],
+            ['btn-highlight', 'highlight'],
         ]) {
             $(id).addEventListener('click', () => this.toggleMode(mode));
         }
@@ -66,6 +67,7 @@ export class MapView {
         $('btn-marker').classList.toggle('active', mode === 'marker');
         $('btn-path').classList.toggle('active', mode === 'path');
         $('btn-label').classList.toggle('active', mode === 'label');
+        $('btn-highlight').classList.toggle('active', mode === 'highlight');
         $('map').classList.toggle('selecting', mode !== null);
         if (mode === 'select') {
             this.map.dragging.disable();

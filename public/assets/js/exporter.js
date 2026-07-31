@@ -161,7 +161,7 @@ export function buildZip(files) {
 
 /**
  * Erzeugt die Viewer-HTML-Datei für den Web-Export. Die Datei ist statisch —
- * die gesamte Konfiguration (Licht, Schatten, Wolken, Ortstafeln, Dateinamen)
+ * die gesamte Konfiguration (Licht, Schatten, Wolken, Ortstafeln, Highlights, Dateinamen)
  * liest der Viewer zur Laufzeit aus projekt.json, die zusammen mit Modell
  * und Texturen im selben Ordner liegt.
  */
@@ -169,77 +169,6 @@ export function buildWebViewerHTML() {
     return `<!DOCTYPE html>
 <!--
   Interaktive 3D-Karte — erstellt mit dem Berglick Map-Generator.
-
-  WICHTIG: Alle Dateien aus dem ZIP (diese HTML-Datei, projekt.json, das
-  Modell *.glb und die Textur-Dateien) gehören zusammen in denselben Ordner
-  auf dem Webserver. Der Viewer liest seine gesamte Konfiguration aus
-  projekt.json; ein Öffnen direkt aus dem Dateisystem (file://) funktioniert
-  nicht — es braucht einen Webserver.
-
-  Die projekt.json lässt sich im Berglick Map-Generator über "Projekt importieren"
-  wieder laden, um das Projekt weiterzubearbeiten. Direkt in der projekt.json
-  editierbar (ohne Neu-Export): Hintergrundfarbe (viewer.backdrop), Marker-
-  und Wegfarben (markers[].color / paths[].color), Wolken (viewer.clouds),
-  Nebelschwaden (viewer.fogDensity / viewer.fogSize), Licht und Schatten (viewer.sunPosition /
-  shadowRadius / shadowIntensity).
-
-  Einbindung auf einer Website:
-    <iframe id="karte" src="terrain-3d.html" width="800" height="600" style="border:0"></iframe>
-
-  Bei aktivierter Option "Transparenter Hintergrund" ist die Seite durchsichtig
-  und die einbettende Website scheint durch den iframe hindurch:
-    <iframe id="karte" src="terrain-3d.html" width="800" height="600"
-            style="border:0; background: transparent" allowtransparency="true"></iframe>
-
-  Schnittstelle: einzelne Marker/Wege/Ortstafeln per JavaScript ein- und
-  ausblenden. Die Namen lauten "marker-<Nr>", "weg-<Nr>" und "tafel-<Nr>"
-  (Nummern wie in der App).
-
-  Von der einbettenden Seite aus (funktioniert auch cross-origin):
-    const karte = document.getElementById('karte');
-    karte.contentWindow.postMessage({ type: 'overlay-visibility', name: 'weg-1', visible: false }, '*');
-    karte.contentWindow.postMessage({ type: 'overlay-toggle', name: 'marker-2' }, '*');
-
-    // Verfügbare Namen abfragen:
-    window.addEventListener('message', (e) => {
-        if (e.data && e.data.type === 'overlay-list') console.log(e.data.names);
-    });
-    karte.contentWindow.postMessage({ type: 'overlay-list' }, '*');
-
-  Bei gleicher Herkunft (same-origin) auch direkt:
-    karte.contentWindow.terrainViewer.setVisible('weg-1', false);
-    karte.contentWindow.terrainViewer.toggle('marker-2');
-    karte.contentWindow.terrainViewer.getVisible('weg-1');  // true | false | null
-    karte.contentWindow.terrainViewer.list();
-
-  Wolken steuern (alle Felder optional: count, speed, size, opacity, color, rain, lightning):
-    karte.contentWindow.postMessage({ type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60, rain: 40 }, '*');
-    karte.contentWindow.postMessage({ type: 'clouds', count: 0 }, '*'); // Wolken aus
-    karte.contentWindow.postMessage({ type: 'clouds', color: '#cbd5e1' }, '*'); // Wolkenfarbe (z. B. graue Regenwolken)
-    karte.contentWindow.postMessage({ type: 'clouds', rain: 0 }, '*');  // Regen aus
-    karte.contentWindow.postMessage({ type: 'clouds', lightning: 60 }, '*'); // Gewitter an
-
-  Bei gleicher Herkunft auch direkt:
-    karte.contentWindow.terrainViewer.setClouds({ opacity: 50 });
-    karte.contentWindow.terrainViewer.getClouds(); // { count, speed, size, opacity, color, rain, lightning }
-
-  Nebelschwaden steuern (density: 0–100, size: Grösse in Prozent):
-    karte.contentWindow.postMessage({ type: 'fog', density: 60 }, '*');
-    karte.contentWindow.postMessage({ type: 'fog', density: 0 }, '*'); // Nebel aus
-    karte.contentWindow.postMessage({ type: 'fog', size: 150 }, '*');  // grössere Schwaden
-
-  Bei gleicher Herkunft auch direkt:
-    karte.contentWindow.terrainViewer.setFog({ density: 60, size: 150 });
-    karte.contentWindow.terrainViewer.getFog(); // { density, size }
-
-  Schneefall steuern (snow: 0–100, size: Flockengrösse in %):
-    karte.contentWindow.postMessage({ type: 'snow', snow: 70 }, '*');
-    karte.contentWindow.postMessage({ type: 'snow', snow: 70, size: 150 }, '*');
-    karte.contentWindow.postMessage({ type: 'snow', snow: 0 }, '*'); // Schnee aus
-
-  Bei gleicher Herkunft auch direkt:
-    karte.contentWindow.terrainViewer.setSnow(70);      // oder { snow: 70, size: 150 }
-    karte.contentWindow.terrainViewer.getSnow();        // { snow, size }
 -->
 <html lang="de">
 <head>
@@ -1357,6 +1286,76 @@ function makeLabelCanvas(text) {
     }
 }
 
+// Highlights: Stab zum Boden + kamerazugewandte Icon-Scheibe in Wunschfarbe.
+// Die Icon-Konturen stecken als Pfaddaten in der Konfiguration (CONFIG.highlightIcons),
+// der Viewer zeichnet die Scheiben daraus auf Canvas.
+const HIGHLIGHTS = CONFIG.highlights || [];
+const HIGHLIGHT_ICONS = CONFIG.highlightIcons || {};
+function makeHighlightCanvas(iconId, color) {
+    const size = 128;
+    const highlightCanvas = document.createElement('canvas');
+    highlightCanvas.width = size;
+    highlightCanvas.height = size;
+    const ctx = highlightCanvas.getContext('2d');
+    const center = size / 2;
+    ctx.beginPath();
+    ctx.arc(center, center, center - 5, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+
+    const icon = HIGHLIGHT_ICONS[iconId];
+    if (icon && icon.paths && icon.paths.length) {
+        const box = icon.viewBox || [0, 0, 32, 32];
+        const iconSize = size * 0.52;
+        const scale = iconSize / Math.max(box[2], box[3]);
+        ctx.save();
+        ctx.translate(
+            center - iconSize / 2 + (iconSize - box[2] * scale) / 2,
+            center - iconSize / 2 + (iconSize - box[3] * scale) / 2
+        );
+        ctx.scale(scale, scale);
+        ctx.translate(-box[0], -box[1]);
+        ctx.fillStyle = '#ffffff';
+        for (const d of icon.paths) ctx.fill(new Path2D(d), 'evenodd');
+        ctx.restore();
+    }
+    return highlightCanvas;
+}
+{
+    const stickGeometry = new THREE.CylinderGeometry(0.12, 0.12, 1, 6);
+    const stickMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+    const stickHeight = 7;
+    const discSize = 5;
+    for (const highlight of HIGHLIGHTS) {
+        const group = new THREE.Group();
+        group.name = highlight.name;
+        const stick = new THREE.Mesh(stickGeometry, stickMaterial);
+        stick.position.set(highlight.position[0], highlight.position[1] + stickHeight / 2, highlight.position[2]);
+        stick.scale.set(1, stickHeight, 1);
+        stick.castShadow = true;
+        const texture = new THREE.CanvasTexture(makeHighlightCanvas(highlight.icon, highlight.color));
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const disc = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthWrite: false,
+            toneMapped: false, // Icon-Farbe bleibt exakt wie gewählt
+        }));
+        disc.scale.set(discSize, discSize, 1);
+        disc.position.set(
+            highlight.position[0],
+            highlight.position[1] + stickHeight + discSize / 2 - 0.2,
+            highlight.position[2]
+        );
+        group.add(stick, disc);
+        scene.add(group);
+        overlayObjects.set(highlight.name, group);
+    }
+}
+
 // Kontaktschatten: ausfadende Kreise unter Markern und Tafeln, aus den
 // allgemeinen Schatten-Einstellungen abgeleitet (Härte, Stärke, Farbe)
 {
@@ -1580,6 +1579,199 @@ renderer.setAnimationLoop(() => {
 </${'script'}>
 </body>
 </html>
+`;
+}
+
+/**
+ * Anleitung für den Web-Export (ANLEITUNG.md). Beschreibt Einbindung per
+ * iframe, die JavaScript-Schnittstelle und die in projekt.json editierbaren
+ * Werte — früher als Kommentarblock in der Viewer-HTML, jetzt als eigene
+ * Datei im Export.
+ */
+export function buildWebViewerReadme() {
+    return `# Interaktive 3D-Karte
+
+Erstellt mit dem Berglick Map-Generator.
+
+## Dateien hochladen
+
+Alle Dateien aus dem ZIP gehören zusammen in **denselben Ordner** auf dem
+Webserver:
+
+| Datei | Inhalt |
+| --- | --- |
+| \`terrain-3d.html\` | Der Viewer selbst |
+| \`terrain.glb\` | 3D-Modell (Gelände, Sockel, Marker, Wege) |
+| \`projekt.json\` | Konfiguration (Licht, Schatten, Wetter, Tafeln, Highlights) |
+| \`textur-*.webp\` / \`.jpg\` / \`.png\` | Texturen für Gelände und Sockel |
+| \`hintergrund.*\` | Hintergrundbild (nur falls eines gesetzt wurde) |
+
+Der Viewer liest seine gesamte Konfiguration zur Laufzeit aus \`projekt.json\`.
+Ein Öffnen direkt aus dem Dateisystem (\`file://\`) funktioniert **nicht** — es
+braucht einen Webserver.
+
+Die \`projekt.json\` lässt sich im Berglick Map-Generator über „Projekt
+importieren“ wieder laden, um das Projekt weiterzubearbeiten.
+
+## Einbindung auf einer Website
+
+\`\`\`html
+<iframe id="karte" src="terrain-3d.html" width="800" height="600" style="border:0"></iframe>
+\`\`\`
+
+Bei aktivierter Option „Transparenter Hintergrund“ ist die Seite durchsichtig
+und die einbettende Website scheint durch den iframe hindurch:
+
+\`\`\`html
+<iframe id="karte" src="terrain-3d.html" width="800" height="600"
+        style="border:0; background: transparent" allowtransparency="true"></iframe>
+\`\`\`
+
+## JavaScript-Schnittstelle
+
+Es gibt zwei gleichwertige Wege:
+
+- **\`postMessage\`** — funktioniert immer, auch wenn iframe und Website auf
+  unterschiedlichen Domains liegen (cross-origin).
+- **\`contentWindow.terrainViewer\`** — nur wenn iframe und Website auf
+  derselben Domain liegen (same-origin), dafür mit Rückgabewerten.
+
+Beide Wege funktionieren erst, wenn der Viewer geladen ist — bei Aufrufen
+direkt beim Seitenaufbau am besten das \`load\`-Ereignis des iframes abwarten.
+
+### Overlays ein- und ausblenden
+
+Einzelne Marker, Wege, Ortstafeln und Highlights lassen sich ein- und
+ausblenden. Die Namen entsprechen den Nummern aus der App:
+
+| Name | Element |
+| --- | --- |
+| \`marker-<Nr>\` | Marker |
+| \`weg-<Nr>\` | Weg |
+| \`tafel-<Nr>\` | Ortstafel |
+| \`highlight-<Nr>\` | Highlight (Symbol-Schild) |
+
+\`\`\`js
+const karte = document.getElementById('karte');
+
+// Ausblenden / einblenden
+karte.contentWindow.postMessage(
+  { type: 'overlay-visibility', name: 'weg-1', visible: false }, '*'
+);
+
+// Umschalten
+karte.contentWindow.postMessage({ type: 'overlay-toggle', name: 'highlight-2' }, '*');
+
+// Verfügbare Namen abfragen (Antwort kommt per message-Ereignis zurück)
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'overlay-list') console.log(e.data.names);
+});
+karte.contentWindow.postMessage({ type: 'overlay-list' }, '*');
+\`\`\`
+
+Same-origin direkt:
+
+\`\`\`js
+const viewer = karte.contentWindow.terrainViewer;
+
+viewer.setVisible('weg-1', false);   // true, wenn der Name existiert
+viewer.toggle('highlight-2');        // true, wenn der Name existiert
+viewer.getVisible('weg-1');          // true | false | null (unbekannter Name)
+viewer.list();                       // alle steuerbaren Namen
+viewer.getView();                    // { polar, azimuth, distance, zoom }
+\`\`\`
+
+### Wolken, Regen und Blitze
+
+Alle Felder sind optional; nur die übergebenen werden geändert.
+
+| Feld | Bedeutung |
+| --- | --- |
+| \`count\` | Anzahl Wolken (0 = keine Wolken) |
+| \`speed\` | Zuggeschwindigkeit in % |
+| \`size\` | Wolkengrösse in % |
+| \`opacity\` | Deckkraft in % |
+| \`color\` | Wolkenfarbe als CSS-Farbe, z. B. \`'#cbd5e1'\` |
+| \`rain\` | Regenstärke in % (0 = kein Regen) |
+| \`lightning\` | Blitzhäufigkeit in % (0 = keine Blitze) |
+
+\`\`\`js
+karte.contentWindow.postMessage(
+  { type: 'clouds', count: 10, speed: 80, size: 150, opacity: 60, rain: 40 }, '*'
+);
+karte.contentWindow.postMessage({ type: 'clouds', count: 0 }, '*');          // Wolken aus
+karte.contentWindow.postMessage({ type: 'clouds', color: '#cbd5e1' }, '*');  // graue Regenwolken
+karte.contentWindow.postMessage({ type: 'clouds', lightning: 60 }, '*');     // Gewitter an
+\`\`\`
+
+Same-origin direkt:
+
+\`\`\`js
+viewer.setClouds({ opacity: 50 });  // gibt die neue Konfiguration zurück
+viewer.getClouds();                 // { count, speed, size, opacity, color, rain, lightning }
+\`\`\`
+
+### Nebelschwaden
+
+| Feld | Bereich |
+| --- | --- |
+| \`density\` | 0–100 (0 = kein Nebel) |
+| \`size\` | 10–400 (Grösse der Schwaden in %) |
+
+\`\`\`js
+karte.contentWindow.postMessage({ type: 'fog', density: 60 }, '*');
+karte.contentWindow.postMessage({ type: 'fog', size: 150 }, '*');  // grössere Schwaden
+karte.contentWindow.postMessage({ type: 'fog', density: 0 }, '*'); // Nebel aus
+\`\`\`
+
+Same-origin direkt:
+
+\`\`\`js
+viewer.setFog({ density: 60, size: 150 });
+viewer.getFog();  // { density, size }
+\`\`\`
+
+### Schneefall
+
+| Feld | Bereich |
+| --- | --- |
+| \`snow\` | 0–100 (0 = kein Schneefall) |
+| \`size\` | 10–400 (Flockengrösse in %) |
+
+\`\`\`js
+karte.contentWindow.postMessage({ type: 'snow', snow: 70 }, '*');
+karte.contentWindow.postMessage({ type: 'snow', snow: 70, size: 150 }, '*');
+karte.contentWindow.postMessage({ type: 'snow', snow: 0 }, '*'); // Schnee aus
+\`\`\`
+
+Same-origin direkt:
+
+\`\`\`js
+viewer.setSnow(70);                    // Kurzform
+viewer.setSnow({ snow: 70, size: 150 });
+viewer.getSnow();                      // { snow, size }
+\`\`\`
+
+## Direkt in projekt.json anpassbar
+
+Diese Werte lassen sich ohne Neu-Export in der \`projekt.json\` ändern; sie
+gelten ab dem nächsten Laden der Seite:
+
+| Feld | Bedeutung |
+| --- | --- |
+| \`viewer.backdrop\` | Hintergrundfarbe |
+| \`markers[].color\` | Farbe eines Markers |
+| \`paths[].color\` | Farbe eines Wegs |
+| \`viewer.highlights[].color\` / \`.icon\` | Farbe und Icon eines Highlights |
+| \`viewer.clouds\` | Wolken (count, speed, size, opacity, color, rain, lightning) |
+| \`viewer.fogDensity\` / \`viewer.fogSize\` | Nebelschwaden |
+| \`viewer.snow\` / \`viewer.snowSize\` | Schneefall |
+| \`viewer.sunPosition\` | Sonnenstand |
+| \`viewer.shadowRadius\` / \`viewer.shadowIntensity\` | Schattenweichheit und -stärke |
+
+Die Icon-Konturen der Highlights liegen als Pfaddaten in
+\`viewer.highlightIcons\`. Wird bei einem Highlight ein \`icon\` gesetzt, das dort
+nicht vorkommt, bleibt die Scheibe leer — in dem Fall besser neu exportieren.
 `;
 }
 

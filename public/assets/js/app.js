@@ -10,6 +10,7 @@ import { TerrainService } from './ui/terrain-service.js';
 import { ProjectSerializer } from './ui/project-store.js';
 import { ExportController } from './ui/export-controller.js';
 import { AppMenu } from './ui/app-menu.js';
+import { loadIcons } from './ui/icons.js';
 
 // ---------------------------------------------------------------------------
 // Kompositionswurzel: erzeugt alle Bausteine und verdrahtet sie untereinander
@@ -138,4 +139,7 @@ class App {
     }
 }
 
+// Icons für die Highlights einmalig laden — danach ist das Zeichnen synchron
+// (nötig für Leaflet-divIcons und die Three-Texturen)
+await loadIcons();
 new App();

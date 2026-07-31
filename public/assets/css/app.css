@@ -790,3 +790,25 @@ footer a {
     background: none;
     border: none;
 }
+
+.highlight-icon {
+    background: none;
+    border: none;
+}
+
+/* Highlight: runde Scheibe mit weissem Icon — wie in der 3D-Ansicht */
+.map-highlight {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+.map-highlight svg {
+    display: block;
+}

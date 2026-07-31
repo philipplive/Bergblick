@@ -1,9 +1,10 @@
 import { $, escapeHTML } from './dom.js';
 import { makeHandle } from './map-view.js';
 import { insideShape, sampleHeight } from '../mesh.js';
+import { DEFAULT_HIGHLIGHT_ICON, HIGHLIGHT_ICONS, iconById, iconSVG } from './icons.js';
 
 // ---------------------------------------------------------------------------
-// Marker, Wege und Ortstafeln auf der Karte (inkl. Liste im Seitenpanel)
+// Marker, Wege, Ortstafeln und Highlights auf der Karte (inkl. Liste im Panel)
 // ---------------------------------------------------------------------------
 
 // Linientypen für Wege: dash = Leaflet-dashArray (null = durchgezogen)
@@ -20,12 +21,13 @@ const DEFAULT_MARKER_COLOR = '#e5484d';
 const DEFAULT_PATH_COLOR = '#ff7733';
 const DEFAULT_PATH_LINE_TYPE = 'solid';
 const DEFAULT_LABEL_TEXT = 'Gipfel';
+const DEFAULT_HIGHLIGHT_COLOR = '#3b82f6';
 
 /**
- * Verwaltet alle Kartenelemente (Marker, Wege, Tafeln): Anlegen per Klick im
- * jeweiligen Modus, Bearbeiten über Griffe und die Liste im Seitenpanel,
- * Projektion in Modellkoordinaten für die 3D-Ansicht. Nach jeder Änderung
- * wird onChange() gerufen (aktualisiert die 3D-Overlays).
+ * Verwaltet alle Kartenelemente (Marker, Wege, Tafeln, Highlights): Anlegen per
+ * Klick im jeweiligen Modus, Bearbeiten über Griffe und die Liste im
+ * Seitenpanel, Projektion in Modellkoordinaten für die 3D-Ansicht. Nach jeder
+ * Änderung wird onChange() gerufen (aktualisiert die 3D-Overlays).
  */
 export class OverlayManager {
     constructor(mapView, { onChange }) {
@@ -33,13 +35,15 @@ export class OverlayManager {
         this.map = mapView.map;
         this.onChange = onChange;
 
-        this.markers = []; // { id, latlng, color, layer }
-        this.paths = [];   // { id, latlngs: [L.LatLng, …], color, lineType, layer, handles }
-        this.labels = [];  // { id, latlng, text, layer }
+        this.markers = [];    // { id, latlng, color, layer }
+        this.paths = [];      // { id, latlngs: [L.LatLng, …], color, lineType, layer, handles }
+        this.labels = [];     // { id, latlng, text, layer }
+        this.highlights = []; // { id, latlng, color, icon, layer }
 
         this.markerSeq = 0;
         this.pathSeq = 0;
         this.labelSeq = 0;
+        this.highlightSeq = 0;
         this.draftPath = null;
 
         this.bindEvents();
@@ -50,6 +54,7 @@ export class OverlayManager {
             if (this.mapView.mode === 'marker') this.addMarker(e.latlng);
             else if (this.mapView.mode === 'path') this.addPathPoint(e.latlng);
             else if (this.mapView.mode === 'label') this.addLabel(e.latlng);
+            else if (this.mapView.mode === 'highlight') this.addHighlight(e.latlng);
         });
 
         this.map.on('dblclick', () => {
@@ -134,6 +139,48 @@ export class OverlayManager {
     removeLabel(entry) {
         this.map.removeLayer(entry.layer);
         this.labels.splice(this.labels.indexOf(entry), 1);
+        this.renderList();
+        this.onChange();
+    }
+
+    // --- Highlights -----------------------------------------------------------
+
+    /** Runde Scheibe in Wunschfarbe mit weissem Icon — wie in der 3D-Ansicht. */
+    highlightIcon(iconId, color) {
+        const html = `<div class="map-highlight" style="background:${color}">
+            ${iconSVG(iconId, '#ffffff', 17)}</div>`;
+        return L.divIcon({ className: 'highlight-icon', html, iconSize: [28, 28], iconAnchor: [14, 14] });
+    }
+
+    createHighlight(latlng, color, iconId, id) {
+        // Farbe und Icon normalisieren: fremde Projektdateien können beides
+        // weglassen, das Farbfeld und die Canvas-Scheibe brauchen gültige Werte
+        const icon = iconById(iconId).id;
+        const fill = /^#[0-9a-f]{6}$/i.test(color ?? '') ? color : DEFAULT_HIGHLIGHT_COLOR;
+        const layer = L.marker(latlng, {
+            icon: this.highlightIcon(icon, fill), bubblingMouseEvents: false, draggable: true,
+        });
+        const entry = { id, latlng, color: fill, icon, layer };
+        layer.on('click', () => {
+            if (this.mapView.mode === 'highlight') this.removeHighlight(entry);
+        });
+        layer.on('dragend', () => {
+            entry.latlng = layer.getLatLng();
+            this.onChange();
+        });
+        layer.addTo(this.map);
+        this.highlights.push(entry);
+    }
+
+    addHighlight(latlng) {
+        this.createHighlight(latlng, DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_ICON, ++this.highlightSeq);
+        this.renderList();
+        this.onChange();
+    }
+
+    removeHighlight(entry) {
+        this.map.removeLayer(entry.layer);
+        this.highlights.splice(this.highlights.indexOf(entry), 1);
         this.renderList();
         this.onChange();
     }
@@ -329,6 +376,30 @@ export class OverlayManager {
             addRow(`Tafel ${l.id}`, () => this.removeLabel(l), dot, text);
         }
 
+        for (const h of this.highlights) {
+            const color = colorInput(h.color, 'Highlight-Farbe ändern', (v) => {
+                h.color = v;
+                h.layer.setIcon(this.highlightIcon(h.icon, v));
+            });
+            const icon = document.createElement('select');
+            icon.className = 'line-type';
+            icon.title = 'Icon ändern';
+            for (const def of HIGHLIGHT_ICONS) {
+                const option = document.createElement('option');
+                option.value = def.id;
+                option.textContent = def.label;
+                icon.appendChild(option);
+            }
+            icon.value = h.icon;
+            icon.addEventListener('change', () => {
+                h.icon = icon.value;
+                h.layer.setIcon(this.highlightIcon(h.icon, h.color));
+                this.onChange();
+            });
+            addRow(`Highlight ${h.id}`, () => this.removeHighlight(h), color,
+                nameSpan(`Highlight ${h.id}`), icon);
+        }
+
         list.hidden = list.children.length === 0;
     }
 
@@ -341,10 +412,12 @@ export class OverlayManager {
             for (const h of p.handles ?? []) this.map.removeLayer(h);
         }
         for (const l of this.labels) this.map.removeLayer(l.layer);
+        for (const h of this.highlights) this.map.removeLayer(h.layer);
         if (this.draftPath) this.map.removeLayer(this.draftPath.layer);
         this.markers.length = 0;
         this.paths.length = 0;
         this.labels.length = 0;
+        this.highlights.length = 0;
         this.draftPath = null;
         this.renderList();
         this.onChange();
@@ -361,6 +434,9 @@ export class OverlayManager {
                 points: p.latlngs.map((ll) => [ll.lat, ll.lng]),
             })),
             labels: this.labels.map((l) => ({ id: l.id, lat: l.latlng.lat, lng: l.latlng.lng, text: l.text })),
+            highlights: this.highlights.map((h) => ({
+                id: h.id, lat: h.latlng.lat, lng: h.latlng.lng, color: h.color, icon: h.icon,
+            })),
         };
     }
 
@@ -376,9 +452,13 @@ export class OverlayManager {
         for (const l of projekt.labels ?? []) {
             this.createLabel(L.latLng(l.lat, l.lng), String(l.text ?? ''), Number(l.id));
         }
+        for (const h of projekt.highlights ?? []) {
+            this.createHighlight(L.latLng(h.lat, h.lng), h.color, h.icon, Number(h.id));
+        }
         this.markerSeq = Math.max(0, ...this.markers.map((m) => m.id));
         this.pathSeq = Math.max(0, ...this.paths.map((p) => p.id));
         this.labelSeq = Math.max(0, ...this.labels.map((l) => l.id));
+        this.highlightSeq = Math.max(0, ...this.highlights.map((h) => h.id));
         this.renderList();
     }
 
@@ -459,6 +539,23 @@ export class OverlayManager {
             }
         }
 
-        return { markers: projectedMarkers, paths: projectedPaths, labels: projectedLabels };
+        const projectedHighlights = [];
+        for (const h of this.highlights) {
+            const [u, v] = toUV(h.latlng);
+            if (inside(u, v)) {
+                projectedHighlights.push({
+                    id: h.id, color: h.color, icon: h.icon, u, v,
+                    h: sampleHeight(rawGrid, u, v),
+                    slope: slopeAt(u, v),
+                });
+            }
+        }
+
+        return {
+            markers: projectedMarkers,
+            paths: projectedPaths,
+            labels: projectedLabels,
+            highlights: projectedHighlights,
+        };
     }
 }

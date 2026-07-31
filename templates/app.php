@@ -64,12 +64,14 @@ declare(strict_types=1);
                 <button id="btn-marker" class="btn">📍 Marker</button>
                 <button id="btn-path" class="btn">✏️ Weg</button>
                 <button id="btn-label" class="btn">🏷️ Tafel</button>
+                <button id="btn-highlight" class="btn">⭐ Highlight</button>
                 <button id="btn-clear-overlays" class="btn">Alle löschen</button>
             </div>
             <ul id="overlay-list" class="overlay-list" hidden></ul>
             <p class="muted">Marker: Klick setzt, Ziehen verschiebt. Weg: Klicks setzen Punkte,
                 Doppelklick beendet; danach Punkte ziehen, „+"-Punkte einfügen, Rechtsklick
                 löscht einen Punkt. Tafel: Klick setzt eine Ortstafel, Ziehen verschiebt sie.
+                Highlight: Klick setzt ein Symbol-Schild; Icon und Farbe wählt man in der Liste.
                 Farbe und Text lassen sich nach dem Setzen in der Liste anpassen; gelöscht
                 wird ebenfalls dort.</p>
         </section>
@@ -281,7 +283,8 @@ declare(strict_types=1);
             </div>
             <p class="muted">Web-Export: ZIP mit Viewer-HTML, 3D-Modell und Texturen als separate
                 Dateien — entpacken, alles zusammen hochladen und per
-                <code>&lt;iframe&gt;</code> einbinden. „Web (HTML) Test“ legt denselben Export
+                <code>&lt;iframe&gt;</code> einbinden. Die beiliegende
+                <code>ANLEITUNG.md</code> beschreibt Einbindung und JavaScript-Schnittstelle. „Web (HTML) Test“ legt denselben Export
                 direkt unter <code>/test/</code> ab und öffnet ihn im neuen Tab.</p>
         </section>
 

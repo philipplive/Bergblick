@@ -37,12 +37,15 @@ Danach im Browser öffnen: <http://localhost:8123>
 ## Funktionen
 
 - **Kartenausschnitt wählen:** Der gewünschte Bereich wird direkt auf der Karte per Auswahlwerkzeug (Rechteck, Kreis oder Sechseck) festgelegt. Die Auswahl ist auf maximal 15 × 15 km begrenzt.
+- **Overlays setzen:** Marker, Wege, Ortstafeln und Highlights lassen sich per Klick auf der Karte platzieren und werden im 3D-Modell auf dem Gelände dargestellt. **Highlights** sind Symbol-Schilder: Aus der Icon-Bibliothek (`public/assets/icons/`) wird ein Icon gewählt, das auf einer farbigen Scheibe über dem Gelände schwebt — Icon und Farbe sind pro Highlight frei einstellbar. Weitere Icons lassen sich ergänzen, indem einfarbige SVGs in den Ordner gelegt und in `public/assets/js/ui/icons.js` unter `HIGHLIGHT_ICONS` eingetragen werden.
 - **Export als STL:** Das erzeugte Geländemodell kann STL exportiert werden – direkt geeignet für den 3D-Druck.
 - **Export als eigenständiges iframe:** Alternativ lässt sich das Modell als statischer, interaktiver Web-Viewer exportieren, der z. B. per `<iframe>` in eine eigene Website eingebettet werden kann. Das Modell (`terrain.glb`) wird dabei mit `EXT_meshopt_compression` komprimiert (typisch ~85 % kleiner), die Texturen als WebP gespeichert (mit JPG- bzw. PNG-Fallback, falls der Browser kein WebP kodieren kann).
 
 ### API des exportierten iframes
 
-Der exportierte Web-Viewer lässt sich von der einbettenden Seite aus per JavaScript steuern. Die Namen der Overlays entsprechen den Nummern aus der App: `marker-<Nr>`, `weg-<Nr>`, `tafel-<Nr>`.
+Der exportierte Web-Viewer lässt sich von der einbettenden Seite aus per JavaScript steuern. Die Namen der Overlays entsprechen den Nummern aus der App: `marker-<Nr>`, `weg-<Nr>`, `tafel-<Nr>`, `highlight-<Nr>`.
+
+> Dieselbe Beschreibung liegt jedem Web-Export als `ANLEITUNG.md` bei — inklusive aller Wertebereiche und der in `projekt.json` editierbaren Felder.
 
 **Cross-origin per `postMessage`** (funktioniert auch, wenn iframe und Seite auf unterschiedlichen Domains liegen):
 

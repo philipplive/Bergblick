@@ -1,3 +1,5 @@
+import { iconPathData } from './icons.js';
+
 // ---------------------------------------------------------------------------
 // Projektdatei: Auswahl, Einstellungen und alle Elemente speichern/laden
 // ---------------------------------------------------------------------------
@@ -37,6 +39,7 @@ export class ProjectSerializer {
         const viewer = this.viewer;
         const settings = this.settings;
         const startView = this.views.startView;
+        const highlights = viewer.getHighlightPlacements();
         return {
             glb: 'terrain.glb',
             terrainTexture: viewer.terrainMesh?.material.map?.image ? 'textur-gelaende.jpg' : null,
@@ -73,6 +76,10 @@ export class ProjectSerializer {
             fogBaseY: viewer.fogBaseY(),
             fogBandHeight: viewer.fogBandHeight(),
             labels: viewer.getLabelPlacements(),
+            highlights: highlights,
+            // Icon-Konturen mitgeben: der exportierte Viewer hat keinen Zugriff
+            // auf assets/icons/ und zeichnet die Scheiben daraus selbst
+            highlightIcons: iconPathData(highlights.map((h) => h.icon)),
             contactShadows: viewer.getContactShadowPlacements(),
             contactShadowHardness: settings.number('opt-shadow-hardness'),
             tiltLimit: settings.number('opt-tilt-limit'),

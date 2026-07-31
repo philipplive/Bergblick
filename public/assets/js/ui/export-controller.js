@@ -1,5 +1,5 @@
 import { $ } from './dom.js';
-import { buildBinarySTL, buildWebViewerHTML, buildZip, downloadBlob } from '../exporter.js';
+import { buildBinarySTL, buildWebViewerHTML, buildWebViewerReadme, buildZip, downloadBlob } from '../exporter.js';
 
 // ---------------------------------------------------------------------------
 // Export: Projektdatei, STL, Web-Export (ZIP) und Test-Export auf den Server
@@ -144,6 +144,7 @@ export class ExportController {
 
         const files = [
             { name: 'terrain-3d.html', data: encoder.encode(buildWebViewerHTML()) },
+            { name: 'ANLEITUNG.md', data: encoder.encode(buildWebViewerReadme()) },
             { name: 'terrain.glb', data: compressedGlb.data },
         ];
 
