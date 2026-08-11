@@ -1,0 +1,12 @@
+.git
+.gitignore
+.idea
+.claude
+.DS_Store
+**/.DS_Store
+cache
+docs
+*.log
+vendor
+composer.lock
+public/test

@@ -28,11 +28,26 @@ gerendert und bleiben beim Web-Export erhalten:
 
 ## Starten
 
+Empfohlen per Docker (bringt PHP 8.3 samt `gd` und `curl` mit):
+
+```bash
+docker compose up
+```
+
+Alternativ direkt mit lokalem PHP:
+
 ```bash
 php -S localhost:8123 -t public
 ```
 
 Danach im Browser öffnen: <http://localhost:8123>
+
+### Entwicklung im Container
+
+Das Projekt ist als Bind-Mount eingebunden — Codeänderungen wirken sofort, ohne
+Rebuild. Nur nach Änderungen am `Dockerfile` oder an `docker/php.ini` ist ein
+`docker compose build` nötig. Der Tile-Cache unter `cache/` liegt weiterhin auf
+dem Host und übersteht damit Container-Neustarts.
 
 ## Funktionen
 

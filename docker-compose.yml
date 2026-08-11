@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8123:8123"
+    volumes:
+      # Bind-Mount: Änderungen am Code greifen sofort, ohne Rebuild.
+      # Der Cache landet damit weiterhin auf dem Host und übersteht Neustarts.
+      - .:/app
