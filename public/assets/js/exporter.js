@@ -1151,8 +1151,16 @@ function animateSnow(delta) {
 
 // Schnittstelle: Marker/Wege ein-/ausblenden, Wolken steuern
 const overlayObjects = new Map();
+const clickHandlers = new Set();
 const terrainViewer = {
     list: () => [...overlayObjects.keys()],
+    onClick(handler) {
+        if (typeof handler === 'function') clickHandlers.add(handler);
+        return () => clickHandlers.delete(handler);
+    },
+    offClick(handler) {
+        return clickHandlers.delete(handler);
+    },
     setVisible(name, visible) {
         const object = overlayObjects.get(name);
         if (object) object.visible = !!visible;
@@ -1228,6 +1236,59 @@ const terrainViewer = {
     getSnow: () => ({ ...snowConfig }),
 };
 window.terrainViewer = terrainViewer;
+
+// --- Klicks auf Marker, Wege, Tafeln und Highlights ---
+// Getroffen wird per Raycast gegen die registrierten Overlays. Da diese teils
+// Gruppen mit Kind-Meshes sind, läuft overlayNameOf vom Treffer nach oben,
+// bis ein in overlayObjects registrierter Name gefunden ist.
+{
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const CLICK_TOLERANZ = 5; // px — darüber gilt die Geste als Kameradrehung
+    let downX = 0;
+    let downY = 0;
+    let downValid = false;
+
+    const overlayNameOf = (object) => {
+        for (let node = object; node; node = node.parent) {
+            if (node.name && overlayObjects.get(node.name) === node) return node.name;
+        }
+        return null;
+    };
+
+    canvas.addEventListener('pointerdown', (event) => {
+        downX = event.clientX;
+        downY = event.clientY;
+        downValid = event.isPrimary;
+    });
+
+    canvas.addEventListener('pointerup', (event) => {
+        if (!downValid || !event.isPrimary) return;
+        downValid = false;
+        if (Math.hypot(event.clientX - downX, event.clientY - downY) > CLICK_TOLERANZ) return;
+
+        const rect = canvas.getBoundingClientRect();
+        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, camera);
+
+        // nur sichtbare Overlays sind anklickbar
+        const targets = [...overlayObjects.values()].filter((object) => object.visible);
+        const hit = raycaster.intersectObjects(targets, true)[0];
+        const name = hit ? overlayNameOf(hit.object) : null;
+
+        for (const handler of clickHandlers) {
+            try {
+                handler(name);
+            } catch (error) {
+                console.error(error);
+            }
+        }
+        if (window.parent !== window) {
+            window.parent.postMessage({ type: 'overlay-click', name }, '*');
+        }
+    });
+}
 
 // Ortstafeln: Stab zum Boden + kamerazugewandtes Textschild (weiss/schwarz)
 const LABELS = CONFIG.labels || [];
@@ -1680,6 +1741,37 @@ viewer.getVisible('weg-1');          // true | false | null (unbekannter Name)
 viewer.list();                       // alle steuerbaren Namen
 viewer.getView();                    // { polar, azimuth, distance, zoom }
 \`\`\`
+
+### Klicks auf Marker, Wege, Tafeln und Highlights
+
+Ein Klick in die Karte meldet den Namen des getroffenen Elements — dieselben
+Namen wie oben (\`marker-<Nr>\`, \`weg-<Nr>\`, \`tafel-<Nr>\`, \`highlight-<Nr>\`).
+Trifft der Klick kein Element, ist \`name\` gleich \`null\`; damit lässt sich zum
+Beispiel eine geöffnete Infobox wieder schliessen.
+
+Ausgeblendete Elemente sind nicht anklickbar. Das Drehen der Kamera löst
+keinen Klick aus.
+
+\`\`\`js
+window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'overlay-click') {
+        if (e.data.name) console.log('Angeklickt:', e.data.name);
+        else console.log('Daneben geklickt');
+    }
+});
+\`\`\`
+
+Same-origin direkt:
+
+\`\`\`js
+viewer.onClick((name) => { ... });   // gibt eine Funktion zum Abmelden zurück
+
+const abmelden = viewer.onClick(zeigeInfo);
+abmelden();                          // oder: viewer.offClick(zeigeInfo)
+\`\`\`
+
+Wege sind schmale Bänder — auf kleinen Bildschirmen muss man sie recht genau
+treffen. Marker, Tafeln und Highlights haben grössere Trefferflächen.
 
 ### Wolken, Regen und Blitze
 

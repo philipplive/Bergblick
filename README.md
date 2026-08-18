@@ -96,6 +96,11 @@ karte.contentWindow.postMessage({ type: 'clouds', rain: 0 }, '*');  // Regen aus
 
 // Schneefall (0–100)
 karte.contentWindow.postMessage({ type: 'snow', snow: 70 }, '*');
+
+// Klicks auf Overlays empfangen (name ist null, wenn daneben geklickt wurde)
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'overlay-click') console.log(e.data.name);
+});
 </script>
 ```
 
@@ -115,7 +120,13 @@ viewer.getClouds();           // { count, speed, size, opacity, rain }
 
 viewer.setSnow(70);           // Schneefall 0–100 (auch { snow: 70 })
 viewer.getSnow();             // { snow }
+
+// Klicks auf Marker, Wege, Tafeln und Highlights
+const abmelden = viewer.onClick((name) => console.log(name));
+abmelden();                   // oder: viewer.offClick(handler)
 ```
+
+Ausgeblendete Overlays sind nicht anklickbar, und das Drehen der Kamera löst keinen Klick aus.
 
 Weitere Einstellungen (Hintergrundfarbe, Marker-/Wegfarben, Licht, Schatten) lassen sich direkt in der mitexportierten `projekt.json` anpassen, ohne erneut exportieren zu müssen.
 
